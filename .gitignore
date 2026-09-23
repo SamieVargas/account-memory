@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+venv/
+.venv/
+chroma_db*/
+# Raw downloads, the EDGAR cache and everything derived from them stay local.
+data/raw/
+data/cache/
+data/derived/
