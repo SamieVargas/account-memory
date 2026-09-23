@@ -83,3 +83,51 @@ Domain-free modules (`parse`, `dates`, `rerank`, `validate`) are in `core/`
 as copied. The ones shaped around the day log (router, contracts, answer,
 pipeline, eval runner, MCP server) are verbatim in `reference/pixels_rag/`
 until their part ports them, so the provenance of every line stays traceable.
+
+## Chunk sizes are counted in plain tokens, and MiniLM cannot read most of them
+
+The brief asks for a fixed window of about 400 tokens. Tokens here are
+`\w+` runs and punctuation marks, so the count is deterministic and needs no
+model: 400 with 80 of overlap, and the section chunker merges under 80 and
+splits over 400. By the all-MiniLM-L6-v2 tokenizer that is a median 1.07
+wordpieces per token, and MiniLM reads at most 256 wordpieces. On the 238
+commercial candidates 99% of fixed chunks and 49% of section chunks are
+longer than that, so MiniLM embeds only their first ~240 tokens. BM25 and
+the cross-encoder read the whole chunk.
+
+Left as the brief has it, a fixed-versus-section comparison under MiniLM
+partly measures truncation. The choice is Samie's, and the ingest report
+counts the chunks over the limit whatever it is. The options: make
+`bge-small-en-v1.5` (512 wordpieces) the default dense model, which Part 6
+installs anyway; shrink the window to about 220 tokens for MiniLM; or keep
+both and report the truncation beside every dense number.
+
+## The automatic set's recall is per gold span
+
+A (contract, category) pair can have several gold spans (CUAD labels every
+passage that bears on the category). recall@k is the share of those spans
+that some top-k chunk from the same contract overlaps, averaged over pairs;
+MRR is the reciprocal rank of the first chunk overlapping any of them.
+Corpus-wide, a chunk from another contract never counts, even if it holds
+the same boilerplate.
+
+## BM25 scores over the whole corpus, then filters
+
+For a scoped query, BM25's IDF still comes from every chunk, and the filter
+only decides which chunks may rank. That keeps a term's weight the same
+across scoped and corpus-wide runs, and matches the dense side, where the
+vectors do not change with the filter either.
+
+## The runner refuses to run before the golden set and the playbook exist
+
+`evals/auto_set.py` exits without retrieving while `evals/golden.jsonl` is
+missing or `data/playbook.md` has no positions, and every result records
+both files' hashes. The guardrail is in code so it cannot be skipped by
+accident.
+
+## The source footer outranks the title for the filer
+
+176 contracts carry EDGAR's `Source: COMPANY, FORM, M/D/YYYY` footer. It
+agrees with the title's filing date on all 176 and names the filer with
+spaces and the exact form, so `core/cuad.py` prefers it; the squashed title
+name is still tried as a second name during CIK resolution.

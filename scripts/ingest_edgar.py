@@ -47,7 +47,7 @@ def read_confirmed() -> dict:
 
 
 def resolve_contract(c, tickers, lookup, confirmed):
-    names = ([c["filer"]] if c["filer"] else []) + c["metadata"]["parties"]["value"]
+    names = [n for n in dict.fromkeys([c["filer"], c.get("title_filer")] + c["metadata"]["parties"]["value"]) if n]
     results, review = [], []
     for n in names:
         if n in confirmed:
