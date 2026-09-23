@@ -41,6 +41,8 @@ An interrupted run (Ctrl+C, SIGTERM, an error, credit running out) writes a
 `-partial` report marked PARTIAL with the count done and exits 130; after a
 hard kill, `--from-progress <file>` rebuilds that report.
 
+The steps left to run, in order, are in `docs/NEXT.md`.
+
 ## Numbers so far
 
 From `evals/results/ingest-cuad-2026-09-23.md`, no model, no embedding:
