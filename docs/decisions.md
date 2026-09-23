@@ -96,12 +96,12 @@ longer than that, so MiniLM embeds only their first ~240 tokens. BM25 and
 the cross-encoder read the whole chunk.
 
 Left as the brief has it, a fixed-versus-section comparison under MiniLM
-partly measures truncation. Samie chose (2026-09-23) to keep MiniLM as the
-default with the brief's chunk sizes and to report the truncation beside
-every dense number: `evals/auto_set.py` and `evals/ablation.py` print the
-share of indexed chunks over the model's limit next to each result.
-`bge-small-en-v1.5` (512 wordpieces, none truncated) runs as an arm in the
-ablation, so whether the default should change is decided by that table.
+partly measures truncation. Samie's call (2026-09-23): the default dense
+model is `BAAI/bge-small-en-v1.5`, which reads 512 wordpieces; only 39 of
+7,431 fixed chunks and 22 of 10,523 section chunks exceed that. MiniLM and
+e5-small stay as ablation arms, and every dense result still prints the
+share of chunks over its model's limit. Whether bge-small retrieves better
+here is for the ablation table to say, not this note.
 
 ## The automatic set's recall is per gold span
 
@@ -149,3 +149,36 @@ sentence-transformers needs torch, so bge-small, e5-small and the
 cross-encoder were tested with fakes only. The ablation writes those rows as
 "not run" with the reason wherever they cannot load, and it waits on the
 golden set and the playbook like every retrieval run.
+
+## Interrupted runs keep their records
+
+`evals/records.py` writes every finished query (and, in the ablation, every
+finished row) to `<stem>.progress.jsonl` as it happens, flushed and fsynced.
+Ctrl+C, SIGTERM or an exception (a model error, credit running out) writes
+`<stem>-partial.md/json` with the count done and exits 130 on an interrupt;
+the ablation also reports the arm in progress as a partial row. A hard kill
+leaves the progress file, and `--from-progress` rebuilds the partial report
+from it. A finished run removes its progress file.
+
+## Review decisions in data/cik_review.csv are kept across reruns
+
+A row marked yes or no is written back unchanged on every EDGAR ingest, and
+a name's decision is used instead of resolving it again: a yes wins, and a
+name whose candidates are all no stays unresolved. Only (name, candidate)
+pairs nobody has decided come back as blank rows, regenerated from the
+current run.
+
+## The playbook counts only when all 30 positions are written
+
+Ten categories, three positions each. Retrieval runs refuse, and the index
+leaves the playbook out, until every one of the 30 has text; the refusal
+lists the empty headings. The optional filing-data section does not count.
+
+## The golden set is written with tools that read data only
+
+`scripts/golden_helper.py` and `evals/check_golden.py` read the contracts,
+spans, Item 1A text and revenue table through `core/golddata.py` and never
+import the store, the retriever or an embedder (a test checks that), so
+looking up offsets while writing questions is not a retrieval run. The line
+format gained `expected_contract_ids` for filter questions, which
+`evals/GOLDEN.md` described but gave no field for.

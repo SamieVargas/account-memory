@@ -13,6 +13,11 @@ recall@k is the share of a query's gold spans that some top-k chunk from the
 same contract overlaps; MRR is 1 / the rank of the first chunk that overlaps
 any of them. Both are averaged over queries, and n is printed with them.
 
+Every finished query is written to <stem>.progress.jsonl as it happens. An
+interrupted run (Ctrl+C, SIGTERM, an error) writes <stem>-partial.md/json,
+marked PARTIAL with the count done, and exits 130 on an interrupt; after a
+hard kill, `--from-progress <file>` rebuilds that report. See evals/records.py.
+
 Refuses to run until evals/golden.jsonl exists and data/playbook.md has
 positions: the brief puts both before any retrieval run. The results carry
 their hashes.
@@ -26,14 +31,20 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "evals"))
 
 from core import store as S  # noqa: E402
 from core.chunking import CHUNKERS  # noqa: E402
 from core.cuad import METADATA_CATEGORIES, load_contracts, load_release, questions  # noqa: E402
-from core.docs import positions_written  # noqa: E402
+from core.docs import playbook_status  # noqa: E402
 from core.embeddings import ARMS, DEFAULT, make_embedding_function, over_limit  # noqa: E402
 from core.retrieve import BM25, MODES, search  # noqa: E402
+from records import INTERRUPTED, Recorder, partial_stem, read_progress  # noqa: E402
 
 KS = (3, 5, 10)
 GOLDEN = ROOT / "evals" / "golden.jsonl"
@@ -48,8 +59,11 @@ def preconditions() -> list[str]:
     problems = []
     if not GOLDEN.exists():
         problems.append("evals/golden.jsonl does not exist yet: write and freeze the golden set first")
-    if not positions_written(PLAYBOOK.read_text(encoding="utf-8")):
-        problems.append("data/playbook.md has no positions yet: write the playbook first")
+    st = playbook_status(PLAYBOOK.read_text(encoding="utf-8"))
+    if not st["complete"]:
+        problems.append(f"data/playbook.md has {st['filled']} of {st['expected']} positions written")
+        problems += [f"  {p}" for p in st["problems"]]
+        problems += [f"  empty: {h}" for h in st["empty"]]
     return problems
 
 
@@ -81,9 +95,11 @@ def score(hits: list[dict], contract_id: str, gold: list[dict], ks=KS) -> dict:
     return out
 
 
-def run(queries, *, collection, bm25, mode, reranker=None, ks=KS) -> dict:
+def run(queries, *, collection, bm25, mode, reranker=None, ks=KS, rows=None, on_row=None) -> dict:
+    """Score every query. Each finished row goes to `rows` (pass a list to
+    keep what finished if this raises) and to `on_row` (the recorder)."""
     kmax = max(ks)
-    rows = []
+    rows = [] if rows is None else rows
     for q in queries:
         row = {"contract_id": q["contract_id"], "category": q["category"], "n_gold": len(q["gold"])}
         for scope, filters in (("scoped", {"contract_id": q["contract_id"]}), ("corpus", None)):
@@ -92,6 +108,12 @@ def run(queries, *, collection, bm25, mode, reranker=None, ks=KS) -> dict:
             row[scope]["wrong_doc_type"] = sum(1 for h in res["hits"][:5] if h["doc_type"] != "contract")
             row[scope]["latency_ms"] = res["latency_ms"]
         rows.append(row)
+        if on_row:
+            on_row(row)
+    return {"summary": summarize(rows, ks), "rows": rows}
+
+
+def summarize(rows, ks=KS) -> dict:
     mean = lambda xs: round(sum(xs) / len(xs), 4) if xs else None
     summary = {"n": len(rows)}
     for scope in ("scoped", "corpus"):
@@ -99,14 +121,23 @@ def run(queries, *, collection, bm25, mode, reranker=None, ks=KS) -> dict:
                           "mrr": mean([r[scope]["mrr"] for r in rows]),
                           "wrong_doc_type_in_top5": sum(r[scope]["wrong_doc_type"] for r in rows),
                           "mean_latency_ms": mean([r[scope]["latency_ms"] for r in rows])}
-    return {"summary": summary, "rows": rows}
+    return summary
 
 
-def render(meta, summary) -> str:
+def pct(v):
+    return "n/a" if v is None else f"{v:.1%}"
+
+
+def num(v, fmt="{:.3f}"):
+    return "n/a" if v is None else fmt.format(v)
+
+
+def render(meta, summary, partial: str | None = None) -> str:
     ol = meta.get("over_limit")
     trunc = (f"{ol[0]} of {ol[1]} indexed chunks ({ol[0] / ol[1]:.0%}) are longer than the embedding model reads, so their dense "
              "vectors cover only the start of the chunk." if ol and ol[1] else "Truncation not counted (no limit, or tokenizer not on disk).")
-    lines = [f"# Automatic retrieval set, {meta['date']}", "",
+    title = f"# Automatic retrieval set, {meta['date']}" + (f" (PARTIAL: {partial})" if partial else "")
+    lines = [title, "",
              f"Chunker {meta['chunker']}, mode {meta['mode']}, reranker {meta['reranker'] or 'none'}, embedding {meta['embedding_model']}, "
              f"n = {summary['n']} (contract, category) queries over {meta['contracts']} contracts. "
              f"Golden set {meta['golden_hash']}, playbook {meta['playbook_hash']}.", "",
@@ -115,9 +146,22 @@ def render(meta, summary) -> str:
              "| --- | --- | --- | --- | --- | --- | --- |"]
     for scope in ("scoped", "corpus"):
         s = summary[scope]
-        lines.append(f"| {scope} | {s['recall']['3']:.1%} | {s['recall']['5']:.1%} | {s['recall']['10']:.1%} | {s['mrr']:.3f} | "
-                     f"{s['wrong_doc_type_in_top5']} | {s['mean_latency_ms']} |")
+        lines.append(f"| {scope} | {pct(s['recall']['3'])} | {pct(s['recall']['5'])} | {pct(s['recall']['10'])} | {num(s['mrr'])} | "
+                     f"{s['wrong_doc_type_in_top5']} | {num(s['mean_latency_ms'], '{}')} |")
     return "\n".join(lines) + "\n"
+
+
+def from_progress(path) -> int:
+    """Rebuild the partial report from a progress file a hard kill left."""
+    meta, records = read_progress(path)
+    rows = [r["row"] for r in records if r.get("type") == "query"]
+    out, stem = partial_stem(path)
+    summary = summarize(rows)
+    note = f"{len(rows)} of {meta.get('n_queries', '?')} queries, rebuilt from {Path(path).name}"
+    (out / f"{stem}-partial.md").write_text(render(meta, summary, note), encoding="utf-8")
+    (out / f"{stem}-partial.json").write_text(json.dumps({"meta": meta, "summary": summary, "rows": rows, "partial": True}, indent=1), encoding="utf-8")
+    print(render(meta, summary, note))
+    return 0
 
 
 def main(argv=None):
@@ -129,7 +173,10 @@ def main(argv=None):
     ap.add_argument("--embedding", choices=list(ARMS), default=DEFAULT)
     ap.add_argument("--db", default=str(S.DEFAULT_DB))
     ap.add_argument("--out", default=str(ROOT / "evals" / "results"))
+    ap.add_argument("--from-progress", metavar="FILE", help="rebuild a partial report from a .progress.jsonl and exit")
     args = ap.parse_args(argv)
+    if args.from_progress:
+        return from_progress(args.from_progress)
     mode = "hybrid" if args.hybrid else args.mode
     problems = preconditions()
     if problems:
@@ -148,15 +195,29 @@ def main(argv=None):
     bm25 = BM25(chunks) if mode != "dense" else None
     from core.rerank import make_reranker
     reranker = make_reranker(None if args.rerank == "none" else args.rerank)
-    result = run(queries, collection=collection, bm25=bm25, mode=mode, reranker=reranker)
     meta = {"date": date.today().isoformat(), "chunker": args.chunker, "mode": mode, "reranker": getattr(reranker, "name", None),
-            "embedding_model": model, "contracts": len(contract_ids), "golden_hash": file_hash(GOLDEN), "playbook_hash": file_hash(PLAYBOOK),
-            "over_limit": over_limit((c["text"] for c in chunks), args.embedding)}
+            "embedding_model": model, "contracts": len(contract_ids), "n_queries": len(queries), "golden_hash": file_hash(GOLDEN),
+            "playbook_hash": file_hash(PLAYBOOK), "over_limit": over_limit((c["text"] for c in chunks), args.embedding)}
     stem = f"{meta['date']}-auto-{args.chunker}-{mode}" + (f"-{args.rerank}" if reranker else "")
-    Path(args.out).mkdir(parents=True, exist_ok=True)
-    (Path(args.out) / f"{stem}.md").write_text(render(meta, result["summary"]), encoding="utf-8")
-    (Path(args.out) / f"{stem}.json").write_text(json.dumps({"meta": meta, **result}, indent=1), encoding="utf-8")
-    print(render(meta, result["summary"]))
+    rows = []
+    with Recorder(args.out, stem, meta) as rec:
+        try:
+            run(queries, collection=collection, bm25=bm25, mode=mode, reranker=reranker, rows=rows,
+                on_row=lambda r: rec.append({"type": "query", "row": r}))
+        except BaseException as e:
+            summary = summarize(rows)
+            why = "interrupted" if isinstance(e, KeyboardInterrupt) else f"{type(e).__name__}: {str(e)[:120]}"
+            md = render(meta, summary, f"{len(rows)} of {len(queries)} queries, {why}")
+            rec.partial(md, {"meta": meta, "summary": summary, "rows": rows, "stopped_by": why})
+            print(md)
+            print(f"wrote {stem}-partial.md; progress kept in {rec.progress.name}")
+            if isinstance(e, KeyboardInterrupt):
+                return INTERRUPTED
+            raise
+        summary = summarize(rows)
+        md = render(meta, summary)
+        rec.finish(md, {"meta": meta, "summary": summary, "rows": rows})
+    print(md)
     return 0
 
 

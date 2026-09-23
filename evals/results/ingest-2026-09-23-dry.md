@@ -1,7 +1,7 @@
 # Ingest, 2026-09-23
 
-Documents: all 238 commercial candidates (no selection applied); 0 Item 1A sections; playbook not written yet, left out.
-Embedding model: all-MiniLM-L6-v2 (dry run: chunked, nothing embedded).
+Documents: all 238 commercial candidates (no selection applied); 0 Item 1A sections; playbook left out until all 30 positions are written.
+Embedding model: BAAI/bge-small-en-v1.5 (dry run: chunked, nothing embedded).
 Chunkers: fixed = 400 tokens with 80 overlap; section = headings, merged under 80 tokens, split over 400. Tokens are \w+ runs and punctuation marks.
 
 ## Contracts
@@ -17,9 +17,9 @@ Chunkers: fixed = 400 tokens with 80 overlap; section = headings, merged under 8
 
 ## Chunks
 
-Over MiniLM's limit: chunks longer than 254 wordpieces by the all-MiniLM-L6-v2 tokenizer, which that model embeds only in part.
+Over a model's limit: chunks longer than that model reads (its max wordpieces less [CLS] and [SEP]), counted with the WordPiece vocabulary bge-small, e5-small and MiniLM share; the model embeds only the start of those chunks.
 
-| Chunker | doc type | docs | chunks | median tokens | max tokens | over MiniLM's limit | boundaries |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| fixed | contract | 238 | 7431 | 400 | 400 | 7327 (99%) | window 238 |
-| section | contract | 238 | 10523 | 226 | 400 | 5118 (49%) | contract_heading 213, paragraph 25 |
+| Chunker | doc type | docs | chunks | median tokens | max tokens | over bge-small (510) | over minilm (254) | boundaries |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fixed | contract | 238 | 7431 | 400 | 400 | 39 (1%) | 7327 (99%) | window 238 |
+| section | contract | 238 | 10523 | 226 | 400 | 22 (0%) | 5118 (49%) | contract_heading 213, paragraph 25 |

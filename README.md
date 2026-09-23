@@ -24,17 +24,22 @@ set are written.
 | 4. Automatic retrieval set | harness done, `evals/auto_set.py`; **not run**, waits on the golden set and playbook |
 | 5. Hybrid BM25 plus dense with reciprocal rank fusion | done, `core/retrieve.py`, `--hybrid`; **not run** |
 | Contract subset | rule written, `data/SELECTION.md`; waits on the EDGAR run |
-| Playbook | headings only, `data/playbook.md`; Samie writes the positions |
-| Golden set | format and mix, `evals/GOLDEN.md`; Samie writes the 40 |
+| Playbook | headings only, `data/playbook.md`; Samie writes the 30 positions (runs refuse until all 30 have text and list the empty ones) |
+| Golden set | format, mix and checks in `evals/GOLDEN.md`; `scripts/golden_helper.py` to write it, `evals/check_golden.py` to validate it; Samie writes the 40 |
 | 6. Embedding arms (MiniLM, bge-small, e5-small) and cross-encoder rerank | harness done, `evals/ablation.py`; **not run**: needs the golden set, and Hugging Face was unreachable from this session |
 | 6. pixels-rag's pending arms | not run: needs the model downloads, and push access to pixels-rag for its PR |
 | 7 to 11 | not started |
 
-MiniLM is the default embedder with the brief's chunk sizes. It reads at
-most 256 wordpieces, and 99% of the 400-token fixed chunks and 49% of the
-section chunks are longer, so every dense result reports that share beside
-it; bge-small, which reads 512, runs as an ablation arm. See
-`docs/decisions.md`.
+bge-small-en-v1.5 is the default embedder, with the brief's chunk sizes. It
+reads 512 wordpieces, and only 1% of fixed chunks and 22 of 10,523 section
+chunks are longer; MiniLM (256, which 99% and 49% exceed) and e5-small stay
+as ablation arms. Every dense result reports the share of chunks over its
+model's limit. See `docs/decisions.md`.
+
+Every eval writes each finished record to a `.progress.jsonl` as it goes.
+An interrupted run (Ctrl+C, SIGTERM, an error, credit running out) writes a
+`-partial` report marked PARTIAL with the count done and exits 130; after a
+hard kill, `--from-progress <file>` rebuilds that report.
 
 ## Numbers so far
 
@@ -50,10 +55,10 @@ From `evals/results/ingest-cuad-2026-09-23.md`, no model, no embedding:
 
 Chunks on the 238 candidates, from `evals/results/ingest-2026-09-23-dry.md`:
 
-| Chunker | chunks | median tokens | over MiniLM's 256-wordpiece limit |
-| --- | --- | --- | --- |
-| fixed, 400 with 80 overlap | 7,431 | 400 | 7,327 (99%) |
-| section, 80 to 400 | 10,523 | 226 | 5,118 (49%) |
+| Chunker | chunks | median tokens | over bge-small's 512 | over MiniLM's 256 |
+| --- | --- | --- | --- | --- |
+| fixed, 400 with 80 overlap | 7,431 | 400 | 39 (1%) | 7,327 (99%) |
+| section, 80 to 400 | 10,523 | 226 | 22 (0.2%) | 5,118 (49%) |
 
 ## Run
 
@@ -61,12 +66,14 @@ Chunks on the 238 candidates, from `evals/results/ingest-2026-09-23-dry.md`:
 pip install -r requirements.txt
 python scripts/fetch_cuad.py                     # CUAD v1 into data/raw/cuad, hashes checked
 python scripts/cuad_report.py                    # the CUAD ingest report
-cp .env.example .env                             # set EDGAR_USER_AGENT="Name email"
+cp .env.example .env                             # set EDGAR_USER_AGENT="Name email"; every entry point loads .env
 python scripts/ingest_edgar.py                   # CIKs, parent filings, Item 1A, revenue; cached
 python scripts/select_contracts.py               # the 80-contract subset
 python ingest.py                                 # both chunkers into chroma_db/, incremental
 python ingest.py --status                        # freshness: current, stale, missing
-python evals/auto_set.py --chunker section --hybrid   # after the golden set and playbook exist
+python scripts/golden_helper.py contracts         # look-ups for writing the golden set (reads data only)
+python evals/check_golden.py                     # validate evals/golden.jsonl; non-zero on any problem
+python evals/auto_set.py --chunker section --hybrid   # after the golden set and all 30 playbook positions exist
 python evals/ablation.py                         # Part 6: embedding arms x dense / hybrid / hybrid + cross-encoder
 python -m pytest                                 # no key, no network
 ```
@@ -80,6 +87,8 @@ python -m pytest                                 # no key, no network
 | `core/docs.py`, `core/store.py` | index documents and the versioned, incremental Chroma store |
 | `core/retrieve.py` | dense, BM25, reciprocal rank fusion, rerank |
 | `ingest.py`, `evals/auto_set.py`, `evals/ablation.py` | the ingest report; the automatic retrieval set; the Part 6 ablation |
+| `evals/records.py` | progress files and partial reports for interrupted runs |
+| `scripts/golden_helper.py`, `evals/check_golden.py`, `core/golddata.py` | writing and validating the golden set, from data only |
 | `core/edgar.py` | the EDGAR client (declared User-Agent, rate limit, URL-keyed cache) and the resolution, filing, Item 1A and revenue parsers |
 | `core/parse.py`, `dates.py`, `rerank.py`, `validate.py` | copied from pixels-rag |
 | `reference/pixels_rag/` | pixels-rag modules waiting to be ported |

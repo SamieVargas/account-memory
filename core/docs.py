@@ -51,19 +51,48 @@ def risk_doc(entry: dict, account: str | None = None) -> dict:
     return {"id": doc_id, "doc_type": "risk_factors", "text": entry["text"], "metadata": _clean(md)}
 
 
+POSITIONS = ("Preferred position", "Acceptable fallback", "Escalate if")
+N_CATEGORIES = 10
+OPTIONAL_SECTION = re.compile(r"filing-data", re.I)
+
+
+def playbook_status(text: str) -> dict:
+    """Which of the 30 required position headings (three under each of the
+    ten category headings) have text under them. The optional filing-data
+    section does not count. A position heading that is missing counts as
+    empty."""
+    cats, cur = {}, None
+    for block in re.split(r"(?=^#{2,3} )", text, flags=re.M):
+        m = re.match(r"^(#{2,3}) (.+?)\s*$", block, flags=re.M)
+        if not m:
+            continue
+        body = block[m.end():].strip()
+        if m[1] == "##":
+            cur = None if OPTIONAL_SECTION.search(m[2]) else m[2].strip()
+            if cur:
+                cats[cur] = {}
+        elif cur:
+            cats[cur][m[2].strip()] = bool(body)
+    empty = [f"{c} / {p}" for c, pos in cats.items() for p in POSITIONS if not pos.get(p)]
+    expected = N_CATEGORIES * len(POSITIONS)
+    filled = sum(1 for pos in cats.values() for p in POSITIONS if pos.get(p))
+    problems = [] if len(cats) == N_CATEGORIES else [f"{len(cats)} category headings, expected {N_CATEGORIES}"]
+    return {"categories": list(cats), "expected": expected, "filled": filled, "empty": empty, "problems": problems,
+            "complete": not problems and filled == expected}
+
+
 def positions_written(text: str) -> int:
-    """How many '### ' position headings have text under them."""
-    parts = re.split(r"^#{2,3} .*$", text, flags=re.M)
-    heads = re.findall(r"^(#{2,3}) .*$", text, flags=re.M)
-    return sum(1 for h, body in zip(heads, parts[1:]) if h == "###" and body.strip())
+    """How many of the required position headings have text."""
+    return playbook_status(text)["filled"]
 
 
 def playbook_doc(path: Path = ROOT / "data" / "playbook.md") -> dict | None:
     """The playbook as one document; the section chunker splits it at its
     '## ' category headings. None while the positions are unwritten, so an
-    empty scaffold never reaches the index."""
+    empty scaffold never reaches the index. Indexed only when all 30
+    positions are written, so no run sees half a playbook."""
     text = Path(path).read_text(encoding="utf-8")
-    if not positions_written(text):
+    if not playbook_status(text)["complete"]:
         return None
     return {"id": "playbook", "doc_type": "playbook", "text": text,
             "metadata": {"doc_type": "playbook", "source": "data/playbook.md"}}

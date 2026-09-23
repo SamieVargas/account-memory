@@ -26,6 +26,10 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from core import edgar as E  # noqa: E402
@@ -36,13 +40,54 @@ REVIEW = ROOT / "data" / "cik_review.csv"
 REVIEW_FIELDS = ("contract_id", "name", "candidate_cik", "candidate_name", "method", "score", "confirmed")
 
 
-def read_confirmed() -> dict:
-    """Names a person marked confirmed=yes (or no) in data/cik_review.csv."""
+def read_review(path=None) -> list[dict]:
+    path = path or REVIEW
+    if not path.exists():
+        return []
+    return [dict(r) for r in csv.DictReader(path.open(encoding="utf-8"))]
+
+
+def _decision(row) -> str:
+    return (row.get("confirmed") or "").strip().lower()
+
+
+def decided_rows(rows) -> list[dict]:
+    """Rows a person marked yes or no. They are kept exactly as written."""
+    return [r for r in rows if _decision(r) in ("yes", "no")]
+
+
+def read_confirmed(rows=None) -> dict:
+    """Name -> (cik, matched name) for a candidate marked yes, or None when
+    every candidate for that name is marked no. A yes wins over any no; a
+    name with some candidates still blank is left to resolve again."""
+    rows = read_review() if rows is None else rows
+    by_name = {}
+    for r in rows:
+        by_name.setdefault(r["name"], []).append(r)
     out = {}
-    if REVIEW.exists():
-        for r in csv.DictReader(REVIEW.open(encoding="utf-8")):
-            if (r.get("confirmed") or "").strip().lower() in ("yes", "no"):
-                out[r["name"]] = (int(r["candidate_cik"]), r["candidate_name"]) if r["confirmed"].strip().lower() == "yes" else None
+    for name, rs in by_name.items():
+        yes = [r for r in rs if _decision(r) == "yes"]
+        if yes:
+            out[name] = (int(yes[0]["candidate_cik"]), yes[0]["candidate_name"])
+        elif all(_decision(r) == "no" for r in rs):
+            out[name] = None
+    return out
+
+
+def merge_review(previous: list[dict], new_candidates: list[dict]) -> list[dict]:
+    """Decided rows from `previous`, unchanged, then one blank row per new
+    (name, candidate) pair that is not already decided. Blank rows from an
+    earlier run are regenerated from this run's candidates, not carried."""
+    kept = decided_rows(previous)
+    seen = {(r["name"], str(r["candidate_cik"])) for r in kept}
+    out = list(kept)
+    for r in new_candidates:
+        key = (r["name"], str(r["cik"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"contract_id": r["contract_id"], "name": r["name"], "candidate_cik": r["cik"], "candidate_name": r["matched_name"],
+                    "method": r["method"], "score": r["score"], "confirmed": ""})
     return out
 
 
@@ -73,7 +118,8 @@ def main(argv=None):
     contracts = [c for c in load_contracts() if c["contract_type"] in COMMERCIAL_TYPES][: args.limit]
     tickers = E.NameIndex(E.load_tickers(client))
     lookup = E.NameIndex(E.load_cik_lookup(client))
-    confirmed = read_confirmed()
+    previous_review = read_review()
+    confirmed = read_confirmed(previous_review)
 
     accounts, review_rows, risk, revenue = [], [], {}, {}
     methods, item1a, parents = Counter(), Counter(), Counter()
@@ -116,12 +162,12 @@ def main(argv=None):
     (DERIVED / "accounts.json").write_text(json.dumps(accounts, indent=1), encoding="utf-8")
     (DERIVED / "risk_factors.json").write_text(json.dumps([v for v in risk.values() if v["ok"]], indent=1), encoding="utf-8")
     (DERIVED / "revenue.json").write_text(json.dumps(list(revenue.values()), indent=1), encoding="utf-8")
+    merged_review = merge_review(previous_review, review_rows)
     with REVIEW.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=REVIEW_FIELDS)
+        w = csv.DictWriter(f, fieldnames=REVIEW_FIELDS, extrasaction="ignore")
         w.writeheader()
-        for r in review_rows:
-            w.writerow({"contract_id": r["contract_id"], "name": r["name"], "candidate_cik": r["cik"], "candidate_name": r["matched_name"],
-                        "method": r["method"], "score": r["score"], "confirmed": ""})
+        w.writerows(merged_review)
+    n_decided = len(decided_rows(previous_review))
 
     resolved = [a for a in accounts if a["cik"]]
     with_rev = [r for r in revenue.values() if r["rows"]]
@@ -132,7 +178,7 @@ def main(argv=None):
              "| Measure | n |", "| --- | --- |",
              f"| Contracts with a resolved account | {len(resolved)} of {len(contracts)} ({len(resolved) / max(len(contracts), 1):.0%}) |",
              *[f"| Names resolved by {m} | {n} |" for m, n in sorted(methods.items())],
-             f"| Borderline matches sent to data/cik_review.csv | {len(review_rows)} |",
+             f"| data/cik_review.csv: decided rows kept / new rows to review | {n_decided} / {len(merged_review) - n_decided} |",
              *[f"| Parent filing {s} | {n} |" for s, n in sorted(parents.items())],
              f"| 10-Ks fetched | {sum(item1a.values())} |",
              f"| Item 1A extractions succeeded / failed | {item1a['succeeded']} / {item1a['failed']} |",

@@ -21,6 +21,7 @@ import chromadb
 
 from core.chunking import CHUNKER_VERSION, chunk_document, source_hash
 from core.docs import content_hash
+from core.embeddings import ARMS, DEFAULT as DEFAULT_ARM
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "chroma_db"
 BATCH = 256
@@ -93,7 +94,7 @@ def _add(coll, chunks):
         coll.add(ids=[c["id"] for c in b], documents=[c["text"] for c in b], metadatas=[chunk_metadata(c) for c in b])
 
 
-def ingest(db, docs: list[dict], *, chunker: str, embedding_function=None, embedding_model: str = "all-MiniLM-L6-v2",
+def ingest(db, docs: list[dict], *, chunker: str, embedding_function=None, embedding_model: str = ARMS[DEFAULT_ARM]["model"],
            prune: bool = False, client=None) -> dict:
     """Upsert `docs` into the chunker's collection. A document whose content
     hash is unchanged is skipped; a changed one has its old chunks deleted
@@ -146,7 +147,7 @@ def ingest(db, docs: list[dict], *, chunker: str, embedding_function=None, embed
     return report
 
 
-def status(db, docs: list[dict] | None, *, chunker: str, embedding_model: str = "all-MiniLM-L6-v2") -> dict:
+def status(db, docs: list[dict] | None, *, chunker: str, embedding_model: str = ARMS[DEFAULT_ARM]["model"]) -> dict:
     """Freshness: documents current, stale (source changed since ingest),
     missing (at the source, not indexed), extra (indexed, gone from the
     source), and whether the stamp still matches the code."""

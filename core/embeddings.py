@@ -2,11 +2,11 @@
 and core/index.py (the hash test embedder); see docs/PROVENANCE.md. The
 ablation runner is evals/ablation.py.
 
-The default is all-MiniLM-L6-v2 (Samie's call, 2026-09-23), with the
-brief's chunk sizes. It reads at most 256 wordpieces, so a 400-token chunk
-is embedded from its first ~240 tokens; bge-small and e5-small read 512.
-Every dense result reports the share of indexed chunks over the model's
-limit beside it.
+The default is BAAI/bge-small-en-v1.5 (Samie's call, 2026-09-23), with the
+brief's chunk sizes. It reads 512 wordpieces, which every 400-token chunk
+fits. all-MiniLM-L6-v2 stays as an arm; it reads 256, so most 400-token
+chunks are embedded from their first ~240 tokens. Every dense result
+reports the share of indexed chunks over its model's limit beside it.
 
 bge and e5 are trained with instructions: bge prefixes short queries with
 a retrieval instruction, e5 prefixes "query: " and "passage: ". Chroma
@@ -26,7 +26,7 @@ ARMS = {
                  "query_prefix": "query: ", "doc_prefix": "passage: "},
     "hash": {"model": "hash-test", "max_wordpieces": None, "needs": "nothing; the offline test embedder, not a contender"},
 }
-DEFAULT = "minilm"
+DEFAULT = "bge-small"
 
 
 class HashEmbedding(EmbeddingFunction):
