@@ -26,11 +26,15 @@ set are written.
 | Contract subset | rule written, `data/SELECTION.md`; waits on the EDGAR run |
 | Playbook | headings only, `data/playbook.md`; Samie writes the positions |
 | Golden set | format and mix, `evals/GOLDEN.md`; Samie writes the 40 |
-| 6 to 11 | not started |
+| 6. Embedding arms (MiniLM, bge-small, e5-small) and cross-encoder rerank | harness done, `evals/ablation.py`; **not run**: needs the golden set, and Hugging Face was unreachable from this session |
+| 6. pixels-rag's pending arms | not run: needs the model downloads, and push access to pixels-rag for its PR |
+| 7 to 11 | not started |
 
-A decision is open: MiniLM, the default embedder, reads at most 256
-wordpieces, and 99% of the 400-token fixed chunks and 49% of section chunks
-are longer. See `docs/decisions.md`.
+MiniLM is the default embedder with the brief's chunk sizes. It reads at
+most 256 wordpieces, and 99% of the 400-token fixed chunks and 49% of the
+section chunks are longer, so every dense result reports that share beside
+it; bge-small, which reads 512, runs as an ablation arm. See
+`docs/decisions.md`.
 
 ## Numbers so far
 
@@ -63,6 +67,7 @@ python scripts/select_contracts.py               # the 80-contract subset
 python ingest.py                                 # both chunkers into chroma_db/, incremental
 python ingest.py --status                        # freshness: current, stale, missing
 python evals/auto_set.py --chunker section --hybrid   # after the golden set and playbook exist
+python evals/ablation.py                         # Part 6: embedding arms x dense / hybrid / hybrid + cross-encoder
 python -m pytest                                 # no key, no network
 ```
 
@@ -74,7 +79,7 @@ python -m pytest                                 # no key, no network
 | `core/chunking.py` | the fixed and section-aware chunkers, as character ranges |
 | `core/docs.py`, `core/store.py` | index documents and the versioned, incremental Chroma store |
 | `core/retrieve.py` | dense, BM25, reciprocal rank fusion, rerank |
-| `ingest.py`, `evals/auto_set.py` | the ingest report; the automatic retrieval set |
+| `ingest.py`, `evals/auto_set.py`, `evals/ablation.py` | the ingest report; the automatic retrieval set; the Part 6 ablation |
 | `core/edgar.py` | the EDGAR client (declared User-Agent, rate limit, URL-keyed cache) and the resolution, filing, Item 1A and revenue parsers |
 | `core/parse.py`, `dates.py`, `rerank.py`, `validate.py` | copied from pixels-rag |
 | `reference/pixels_rag/` | pixels-rag modules waiting to be ported |
@@ -91,3 +96,16 @@ python -m pytest                                 # no key, no network
 - **SEC EDGAR** filings and XBRL company facts, U.S. Securities and Exchange
   Commission, public domain. Fetched with a declared User-Agent under the
   SEC's fair-access policy and cached locally; nothing bulk is committed.
+
+## pixels-rag's pending arms (Part 6)
+
+The brief also asks for pixels-rag's "not run" rows to be run while
+sentence-transformers is installed. In a pixels-rag checkout:
+
+```bash
+pip install sentence-transformers==6.1.0
+python evals/run.py --offline --embedding-ablation
+python evals/run.py --offline --rerank-compare --rerank cross-encoder
+```
+
+The results go in pixels-rag on their own PR.

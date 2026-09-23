@@ -7,8 +7,11 @@ python-dotenv>=1.0.0
 pytest>=8.0.0
 rank_bm25==0.2.2          # Part 5, hybrid retrieval
 
+# Part 6 arms (bge-small, e5-small, the cross-encoder). Pulls in torch; the
+# ablation reports these arms as not run when it is missing.
+sentence-transformers==6.1.0
+
 # Added by their parts, not yet installed or run:
-# sentence-transformers  Part 6, cross-encoder and the bge/e5 arms
 # ragas                  Part 9, pinned to one version after reading its current docs
 # llama-index            Part 10, the comparison arm only
 # mcp                    Part 14, optional

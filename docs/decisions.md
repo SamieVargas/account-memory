@@ -96,11 +96,12 @@ longer than that, so MiniLM embeds only their first ~240 tokens. BM25 and
 the cross-encoder read the whole chunk.
 
 Left as the brief has it, a fixed-versus-section comparison under MiniLM
-partly measures truncation. The choice is Samie's, and the ingest report
-counts the chunks over the limit whatever it is. The options: make
-`bge-small-en-v1.5` (512 wordpieces) the default dense model, which Part 6
-installs anyway; shrink the window to about 220 tokens for MiniLM; or keep
-both and report the truncation beside every dense number.
+partly measures truncation. Samie chose (2026-09-23) to keep MiniLM as the
+default with the brief's chunk sizes and to report the truncation beside
+every dense number: `evals/auto_set.py` and `evals/ablation.py` print the
+share of indexed chunks over the model's limit next to each result.
+`bge-small-en-v1.5` (512 wordpieces, none truncated) runs as an arm in the
+ablation, so whether the default should change is decided by that table.
 
 ## The automatic set's recall is per gold span
 
@@ -131,3 +132,20 @@ accident.
 agrees with the title's filing date on all 176 and names the filer with
 spaces and the exact form, so `core/cuad.py` prefers it; the squashed title
 name is still tried as a second name during CIK resolution.
+
+## bge and e5 run with their query and passage prefixes
+
+bge-small-en-v1.5 is trained to see a retrieval instruction before short
+queries, and e5-small-v2 to see "query: " and "passage: ". pixels-rag ran
+both through Chroma's plain sentence-transformers function, without them.
+Here `PrefixedSentenceTransformer` adds the document prefix when chunks are
+embedded and the query prefix through Chroma's `embed_query`, so each arm is
+measured the way it is meant to be used. MiniLM takes no prefix.
+
+## The ablation cannot run in the setup session
+
+Hugging Face was unreachable from the session that wrote Part 6, and
+sentence-transformers needs torch, so bge-small, e5-small and the
+cross-encoder were tested with fakes only. The ablation writes those rows as
+"not run" with the reason wherever they cannot load, and it waits on the
+golden set and the playbook like every retrieval run.

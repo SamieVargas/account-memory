@@ -21,7 +21,7 @@ Source: `SamieVargas/pixels-rag` at `7bf4c8e38b1e935dc1f965d16c0eb532267b3c73`
 | `reference/pixels_rag/pipeline.py` | `core/pipeline.py` | `fff844bac231` | reference: gather and ask, Parts 4 and 7 |
 | `core/store.py` | `core/store.py` | `6f83c93ab06c` | adapted (Part 1): stamp and rebuild-on-mismatch kept; keyed by document id with a per-document content hash, one collection per chunker, freshness over documents instead of days |
 | `core/embeddings.py` (HashEmbedding), `core/retrieve.py` (dense) | `core/index.py` | `923fc8439afc` | adapted (Part 1): the hash test embedder copied; dense retrieval rewritten around metadata `where` filters instead of allowed ids |
-| `core/embeddings.py`, `reference/pixels_rag/embeddings.py` | `core/embeddings.py` | `de9cdff8f7da` | adapted (Part 1): the arms and `make_embedding_function`; the reference copy stays for `run_arm`, which Part 6 ports |
+| `core/embeddings.py`, `evals/ablation.py` | `core/embeddings.py` | `de9cdff8f7da` | adapted (Parts 1 and 6): the arms and `make_embedding_function`, with query and passage prefixes added for bge and e5; `run_arm` rewritten as the ablation over the automatic set, keeping its 'not run, and why' rows |
 | `reference/pixels_rag/evals_run.py` | `evals/run.py` | `634bb4839ec4` | reference: recall@k, MRR, partial-run handling, Parts 4 and 8 |
 | `reference/pixels_rag/mcp_server.py` | `mcp_server.py` | `58b4c2364fd6` | reference: read-only stdio server, Part 14 |
 | `reference/pixels_rag/stubs.py` | `tests/stubs.py` | `fcd328f0f9f0` | reference: scripted Anthropic client for offline tests |
