@@ -32,7 +32,7 @@ from core import store as S  # noqa: E402
 from core.chunking import CHUNKERS  # noqa: E402
 from core.cuad import METADATA_CATEGORIES, load_contracts, load_release, questions  # noqa: E402
 from core.docs import positions_written  # noqa: E402
-from core.embeddings import ARMS, DEFAULT, make_embedding_function  # noqa: E402
+from core.embeddings import ARMS, DEFAULT, make_embedding_function, over_limit  # noqa: E402
 from core.retrieve import BM25, MODES, search  # noqa: E402
 
 KS = (3, 5, 10)
@@ -103,10 +103,14 @@ def run(queries, *, collection, bm25, mode, reranker=None, ks=KS) -> dict:
 
 
 def render(meta, summary) -> str:
+    ol = meta.get("over_limit")
+    trunc = (f"{ol[0]} of {ol[1]} indexed chunks ({ol[0] / ol[1]:.0%}) are longer than the embedding model reads, so their dense "
+             "vectors cover only the start of the chunk." if ol and ol[1] else "Truncation not counted (no limit, or tokenizer not on disk).")
     lines = [f"# Automatic retrieval set, {meta['date']}", "",
              f"Chunker {meta['chunker']}, mode {meta['mode']}, reranker {meta['reranker'] or 'none'}, embedding {meta['embedding_model']}, "
              f"n = {summary['n']} (contract, category) queries over {meta['contracts']} contracts. "
              f"Golden set {meta['golden_hash']}, playbook {meta['playbook_hash']}.", "",
+             *([trunc, ""] if meta["mode"] != "bm25" else []),
              "| Scope | recall@3 | recall@5 | recall@10 | MRR | non-contract chunks in top 5 | mean ms |",
              "| --- | --- | --- | --- | --- | --- | --- |"]
     for scope in ("scoped", "corpus"):
@@ -140,12 +144,14 @@ def main(argv=None):
     manifest = S.read_manifest(args.db, args.chunker)
     contract_ids = {k for k, v in manifest["docs"].items() if v["doc_type"] == "contract"}
     queries = build_queries(load_contracts(), questions(load_release()), contract_ids)
-    bm25 = BM25(S.read_chunks(args.db, args.chunker)) if mode != "dense" else None
+    chunks = S.read_chunks(args.db, args.chunker)
+    bm25 = BM25(chunks) if mode != "dense" else None
     from core.rerank import make_reranker
     reranker = make_reranker(None if args.rerank == "none" else args.rerank)
     result = run(queries, collection=collection, bm25=bm25, mode=mode, reranker=reranker)
     meta = {"date": date.today().isoformat(), "chunker": args.chunker, "mode": mode, "reranker": getattr(reranker, "name", None),
-            "embedding_model": model, "contracts": len(contract_ids), "golden_hash": file_hash(GOLDEN), "playbook_hash": file_hash(PLAYBOOK)}
+            "embedding_model": model, "contracts": len(contract_ids), "golden_hash": file_hash(GOLDEN), "playbook_hash": file_hash(PLAYBOOK),
+            "over_limit": over_limit((c["text"] for c in chunks), args.embedding)}
     stem = f"{meta['date']}-auto-{args.chunker}-{mode}" + (f"-{args.rerank}" if reranker else "")
     Path(args.out).mkdir(parents=True, exist_ok=True)
     (Path(args.out) / f"{stem}.md").write_text(render(meta, result["summary"]), encoding="utf-8")
