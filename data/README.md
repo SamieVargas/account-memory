@@ -73,7 +73,7 @@ set to "Name email". Reads and writes:
 | `data/derived/accounts.json` | per contract: every name tried, its CIK and method, the account, parent filing, the 10-K used and its gap in days |
 | `data/derived/risk_factors.json` | Item 1A text for successful extractions only |
 | `data/derived/revenue.json` | per company: annual revenue rows with `row_id`, fiscal year end, value, concept, filing |
-| `data/cik_review.csv` | committed: borderline name matches, one row each, for a person to mark `confirmed` yes or no |
+| `data/cik_review.csv` | committed: borderline name matches, one row each, for a person to mark `confirmed` yes or no; decided rows are kept unchanged across reruns and only new pairs are added |
 
 Resolution order is the SEC tickers file, then EDGAR's company-name index
 (`cik-lookup-data.txt`, every filer past and present), exact before fuzzy at

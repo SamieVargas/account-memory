@@ -23,6 +23,10 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from core import store as S  # noqa: E402
@@ -62,11 +66,11 @@ def gather_docs(candidates: bool = False):
     return docs + risk + ([pb] if pb else []), chosen, source
 
 
-def report(docs, records, source, results, embedding_model, dry_run):
+def report(docs, records, source, results, embedding_model, dry_run, embedding_arm=DEFAULT):
     today = date.today().isoformat()
     by_type = Counter(d["doc_type"] for d in docs)
     lines = [f"# Ingest, {today}", "", f"Documents: {source}; {by_type['risk_factors']} Item 1A sections; "
-             f"playbook {'included' if by_type['playbook'] else 'not written yet, left out'}.",
+             f"playbook {'included' if by_type['playbook'] else 'left out until all 30 positions are written'}.",
              f"Embedding model: {embedding_model}{' (dry run: chunked, nothing embedded)' if dry_run else ''}.",
              f"Chunkers: fixed = {FIXED_TOKENS} tokens with {FIXED_OVERLAP} overlap; section = headings, merged under "
              f"{SECTION_MIN} tokens, split over {SECTION_MAX}. Tokens are \\w+ runs and punctuation marks.", "",
@@ -78,11 +82,13 @@ def report(docs, records, source, results, embedding_model, dry_run):
         c = Counter(r["metadata"][f]["status"] for r in records)
         lines.append(f"| {f}: parsed / unparsed / absent | {c['parsed']} / {c['unparsed']} / {c['absent']} |")
     wp = wordpiece_counter()
-    limit = ARMS["minilm"]["max_wordpieces"] - 2
-    lines += ["", "## Chunks", "", f"Over MiniLM's limit: chunks longer than {limit} wordpieces by the all-MiniLM-L6-v2 tokenizer, "
-              "which that model embeds only in part" + ("" if wp else " (tokenizer not on disk, not counted)") + ".", "",
-              "| Chunker | doc type | docs | chunks | median tokens | max tokens | over MiniLM's limit | boundaries |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    limits = [(a, ARMS[a]["max_wordpieces"] - 2) for a in (embedding_arm, "minilm") if ARMS[a]["max_wordpieces"]]
+    limits = list(dict.fromkeys(limits))
+    lines += ["", "## Chunks", "", "Over a model's limit: chunks longer than that model reads (its max wordpieces less [CLS] and [SEP]), "
+              "counted with the WordPiece vocabulary bge-small, e5-small and MiniLM share; the model embeds only the start of those chunks"
+              + ("" if wp else " (tokenizer not on disk, not counted)") + ".", "",
+              "| Chunker | doc type | docs | chunks | median tokens | max tokens | " + " | ".join(f"over {a} ({l})" for a, l in limits) + " | boundaries |",
+              "| --- " * (7 + len(limits)) + "|"]
     for chunker, res in results.items():
         chunks = res["chunks"]
         for dt in ("contract", "risk_factors", "playbook"):
@@ -93,8 +99,8 @@ def report(docs, records, source, results, embedding_model, dry_run):
             for doc_id in {c["doc_id"] for c in cs}:
                 kinds[next(c["boundary"] for c in cs if c["doc_id"] == doc_id)] += 1
             t = [c["tokens"] for c in cs]
-            over = sum(1 for n in wp(c["text"] for c in cs) if n > limit) if wp else None
-            over_s = f"{over} ({over / len(cs):.0%})" if over is not None else "n/a"
+            counts = wp([c["text"] for c in cs]) if wp else None
+            over_s = " | ".join((lambda o: f"{o} ({o / len(cs):.0%})")(sum(1 for n in counts if n > l)) if counts else "n/a" for _, l in limits)
             lines.append(f"| {chunker} | {dt} | {len({c['doc_id'] for c in cs})} | {len(cs)} | {statistics.median(t):.0f} | {max(t)} | {over_s} | "
                          + ", ".join(f"{k} {v}" for k, v in kinds.most_common()) + " |")
     if not dry_run:
@@ -134,7 +140,7 @@ def main(argv=None):
         else:
             r = S.ingest(args.db, docs, chunker=ch, embedding_function=ef, embedding_model=model, prune=args.prune)
             results[ch] = {"ingest": r, "chunks": S.read_chunks(args.db, ch)}
-    out, lines = report(docs, records, source, results, model, args.dry_run)
+    out, lines = report(docs, records, source, results, model, args.dry_run, args.embedding)
     print("\n".join(lines))
     print(f"\nwrote {out.relative_to(ROOT)}")
     return 0

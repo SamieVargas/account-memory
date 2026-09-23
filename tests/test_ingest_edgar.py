@@ -58,3 +58,54 @@ def test_ingest_edgar_offline(tmp_path, monkeypatch):
     report = next((tmp_path / "evals" / "results").glob("ingest-edgar-*.md")).read_text()
     assert "| Contracts with a resolved account | 1 of 1 (100%) |" in report
     assert "Item 1A extractions succeeded / failed | 1 / 0" in report
+
+
+def test_review_decisions_survive_reruns(tmp_path, monkeypatch):
+    """A name marked yes in data/cik_review.csv is written back unchanged and
+    used on every later run; new borderline names arrive as blank rows."""
+    import csv
+    text = "SUPPLY AGREEMENT between Acme Widgets, Inc. and Betta Part LLC."
+    entry = {"title": "ACMEWIDGETSINC_20100305_8-K_EX-10.1_1_EX-10.1_SUPPLY AGREEMENT", "paragraphs": [{"context": text, "qas": [
+        {"id": "x__Parties", "question": "q", "answers": [{"text": "Betta Part LLC", "answer_start": text.index("Betta")}]}]}]}
+    rec = C.build_record(entry)
+    cache = tmp_path / "cache"
+    seed(cache, E.TICKERS_URL, {"0": {"cik_str": 42, "ticker": "ACME", "title": "Acme Widgets Inc"}})
+    seed(cache, E.CIK_LOOKUP_URL, b"BETA PARTS LLC:0000000077:\n")
+    seed(cache, E.SUBMISSIONS_URL.format(cik=42), {"filings": {"recent": {}, "files": []}})
+    seed(cache, E.FACTS_URL.format(cik=42), {"facts": {}})
+    review = tmp_path / "cik_review.csv"
+    monkeypatch.setattr(ing, "load_contracts", lambda: [rec])
+    monkeypatch.setattr(ing, "DERIVED", tmp_path / "derived")
+    monkeypatch.setattr(ing, "REVIEW", review)
+    monkeypatch.setattr(ing, "ROOT", tmp_path)
+    (tmp_path / "evals" / "results").mkdir(parents=True)
+    run = lambda: ing.main(["--offline", "--cache-dir", str(cache)])
+    rows = lambda: list(csv.DictReader(review.open(encoding="utf-8")))
+
+    assert run() == 0
+    first = rows()
+    assert [(r["name"], r["candidate_cik"], r["confirmed"]) for r in first] == [("Betta Part LLC", "77", "")]
+    first[0]["confirmed"] = "yes"
+    with review.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=ing.REVIEW_FIELDS)
+        w.writeheader()
+        w.writerows(first)
+
+    for _ in range(2):
+        assert run() == 0
+        assert rows() == first
+        acc = json.loads((tmp_path / "derived" / "accounts.json").read_text())[0]
+        assert {"name": "Betta Part LLC", "cik": 77, "matched_name": "BETA PARTS LLC", "method": "manual_review"} in acc["resolutions"]
+
+
+def test_merge_review_keeps_decisions_and_adds_only_new_pairs():
+    prev = [{"contract_id": "c1", "name": "A Co", "candidate_cik": "1", "candidate_name": "A CORP", "method": "m", "score": "0.9", "confirmed": "no"},
+            {"contract_id": "c1", "name": "B Co", "candidate_cik": "2", "candidate_name": "B CORP", "method": "m", "score": "0.9", "confirmed": ""}]
+    new = [{"contract_id": "c2", "name": "A Co", "cik": 1, "matched_name": "A CORP", "method": "m", "score": 0.9},
+           {"contract_id": "c2", "name": "A Co", "cik": 3, "matched_name": "A INC", "method": "m", "score": 0.88},
+           {"contract_id": "c3", "name": "A Co", "cik": 3, "matched_name": "A INC", "method": "m", "score": 0.88}]
+    out = ing.merge_review(prev, new)
+    assert out[0] == prev[0] and [(r["name"], str(r["candidate_cik"]), r["confirmed"]) for r in out[1:]] == [("A Co", "3", "")]
+    assert ing.read_confirmed(out) == {}
+    assert ing.read_confirmed([prev[0]]) == {"A Co": None}
+    assert ing.read_confirmed([prev[0], {**prev[0], "candidate_cik": "3", "confirmed": "yes"}]) == {"A Co": (3, "A CORP")}
