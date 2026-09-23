@@ -19,9 +19,9 @@ Source: `SamieVargas/pixels-rag` at `7bf4c8e38b1e935dc1f965d16c0eb532267b3c73`
 | `reference/pixels_rag/aggregate.py` | `core/aggregate.py` | `2119ba1a218b` | reference: pandas aggregate route, Part 7 |
 | `reference/pixels_rag/filters.py` | `core/filters.py` | `893b3baac90e` | reference: metadata filters in code, Part 7 |
 | `reference/pixels_rag/pipeline.py` | `core/pipeline.py` | `fff844bac231` | reference: gather and ask, Parts 4 and 7 |
-| `reference/pixels_rag/store.py` | `core/store.py` | `6f83c93ab06c` | reference: idempotent upsert, version stamp, freshness status, Part 1 |
-| `reference/pixels_rag/index.py` | `core/index.py` | `923fc8439afc` | reference: Chroma build and id-restricted retrieval, the hash test embedder, Part 1 |
-| `reference/pixels_rag/embeddings.py` | `core/embeddings.py` | `de9cdff8f7da` | reference: the embeddings harness and arms, Part 6 |
+| `core/store.py` | `core/store.py` | `6f83c93ab06c` | adapted (Part 1): stamp and rebuild-on-mismatch kept; keyed by document id with a per-document content hash, one collection per chunker, freshness over documents instead of days |
+| `core/embeddings.py` (HashEmbedding), `core/retrieve.py` (dense) | `core/index.py` | `923fc8439afc` | adapted (Part 1): the hash test embedder copied; dense retrieval rewritten around metadata `where` filters instead of allowed ids |
+| `core/embeddings.py`, `reference/pixels_rag/embeddings.py` | `core/embeddings.py` | `de9cdff8f7da` | adapted (Part 1): the arms and `make_embedding_function`; the reference copy stays for `run_arm`, which Part 6 ports |
 | `reference/pixels_rag/evals_run.py` | `evals/run.py` | `634bb4839ec4` | reference: recall@k, MRR, partial-run handling, Parts 4 and 8 |
 | `reference/pixels_rag/mcp_server.py` | `mcp_server.py` | `58b4c2364fd6` | reference: read-only stdio server, Part 14 |
 | `reference/pixels_rag/stubs.py` | `tests/stubs.py` | `fcd328f0f9f0` | reference: scripted Anthropic client for offline tests |

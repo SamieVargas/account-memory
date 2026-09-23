@@ -133,6 +133,21 @@ def parse_title(title: str) -> dict:
     return out
 
 
+_SOURCE = re.compile(r"Source:\s*(?P<filer>[^\n,][^\n]*?),\s*(?P<form>[0-9A-Z][0-9A-Z/\-. ]*?),\s*(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>\d{4})")
+
+
+def source_footer(text: str) -> dict | None:
+    """The 'Source: COMPANY, FORM, M/D/YYYY' footer EDGAR's exhibit renderer
+    left on about a third of the contracts. It names the filer with spaces
+    and the exact form, which the squashed title does not. Only a footer
+    that is the same on every page counts."""
+    found = {(m["filer"].strip(), m["form"].strip(), _iso(int(m["y"]), int(m["m"]), int(m["d"]))) for m in _SOURCE.finditer(text)}
+    if len(found) != 1:
+        return None
+    filer, form, when = found.pop()
+    return {"filer": filer, "form": form, "filing_date": when}
+
+
 def contract_types(*texts) -> list[str]:
     blob = " ".join(t for t in texts if t).lower().replace("_", " ")
     return [name for name, pat in TYPE_KEYWORDS if re.search(pat, blob)]
@@ -333,6 +348,7 @@ def build_record(entry: dict) -> dict:
             spans.append({"category": cat, "start": start, "end": end})
             by_cat.setdefault(cat, []).append(a["text"])
     t = parse_title(title)
+    src = source_footer(text)
     doc_name = (by_cat.get("Document Name") or [None])[0]
     types = contract_types(t["title_type"], doc_name)
     party_spans = by_cat.get("Parties", [])
@@ -346,7 +362,9 @@ def build_record(entry: dict) -> dict:
         "governing_law": _law_field(by_cat.get("Governing Law", [])),
     }
     return {"id": contract_id(title), "title": title, "doc_type": "contract", "text": text, "chars": len(text),
-            "filer": t["filer"], "filing_date": t["filing_date"], "form": t["form"], "exhibit": t["exhibit"],
+            "filer": src["filer"] if src else t["filer"], "title_filer": t["filer"],
+            "filing_date": (src or {}).get("filing_date") or t["filing_date"], "form": src["form"] if src else t["form"],
+            "exhibit": t["exhibit"], "filer_from": "source_footer" if src else ("title" if t["filer"] else None),
             "title_format": t["title_format"], "document_name": doc_name, "contract_type": types[0] if types else None,
             "contract_types": types, "metadata": meta, "spans": sorted(spans, key=lambda s: (s["start"], s["category"])),
             "unmapped_spans": unmapped}
