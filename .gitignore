@@ -10,3 +10,6 @@ chroma_db*/
 data/raw/
 data/cache/
 data/derived/
+# Scratch exports and notebook autosaves
+/metadata.csv
+.ipynb_checkpoints/

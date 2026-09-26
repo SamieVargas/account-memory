@@ -25,6 +25,7 @@ their hashes.
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import sys
 from datetime import date
@@ -60,6 +61,14 @@ def preconditions() -> list[str]:
     problems = []
     if not GOLDEN.exists():
         problems.append("evals/golden.jsonl does not exist yet: write and freeze the golden set first")
+    else:
+        # existing is not enough: a partial or empty file must not unlock a retrieval run
+        spec = importlib.util.spec_from_file_location("check_golden", ROOT / "evals" / "check_golden.py")
+        cg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cg)
+        bad = cg.check(GOLDEN)
+        if bad:
+            problems.append(f"evals/golden.jsonl has {len(bad)} problem(s); run python evals/check_golden.py")
     st = playbook_status(PLAYBOOK.read_text(encoding="utf-8"))
     if not st["complete"]:
         problems.append(f"data/playbook.md has {st['filled']} of {st['expected']} positions written")

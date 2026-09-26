@@ -11,6 +11,8 @@ rank_bm25==0.2.2          # Part 5, hybrid retrieval
 # ablation reports these arms as not run when it is missing.
 sentence-transformers==6.1.0
 
+# Optional: notebooks/golden_workbench.ipynb (pip install notebook)
+
 # Added by their parts, not yet installed or run:
 # ragas                  Part 9, pinned to one version after reading its current docs
 # llama-index            Part 10, the comparison arm only
