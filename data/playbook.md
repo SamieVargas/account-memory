@@ -2,6 +2,8 @@
 
 I am writing every position below. I am committing these changes _before_ the golden set is written and before any retrieval run. The playbook-check questions will be graded against this file, and its hash goes into every result. Heading are each category, and the category names match CUAD's, so each position can be joined to its gold spans. CUAD is the Contract Understanding Atticus Dataset, a massive, open-source benchmark collection used in AI & NLP to review legal agreements. 
 
+Written from a vendor's side, the counterparty is the client account, the company whose SEC filings we have.
+
 Not legal advice.
 
 ## 1. Cap On Liability
