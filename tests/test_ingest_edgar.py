@@ -109,3 +109,40 @@ def test_merge_review_keeps_decisions_and_adds_only_new_pairs():
     assert ing.read_confirmed(out) == {}
     assert ing.read_confirmed([prev[0]]) == {"A Co": None}
     assert ing.read_confirmed([prev[0], {**prev[0], "candidate_cik": "3", "confirmed": "yes"}]) == {"A Co": (3, "A CORP")}
+
+
+def test_one_bad_contract_does_not_stop_the_run(tmp_path, monkeypatch):
+    """A 10-K with no primary document is a recorded failure (and no
+    request); a company whose filings the SEC will not serve is a recorded
+    error; the run finishes and reports both."""
+    def rec_for(filer, party):
+        text = f"SUPPLY AGREEMENT dated March 1, 2010 between {filer} and {party}."
+        return C.build_record({"title": f"{filer.upper().replace(' ', '').replace(',', '').replace('.', '')}_20100305_8-K_EX-10.1_1_EX-10.1_SUPPLY AGREEMENT",
+                               "paragraphs": [{"context": text, "qas": [
+                                   {"id": "x__Agreement Date", "question": "q", "answers": [{"text": "March 1, 2010", "answer_start": text.index("March")}]}]}]})
+    good, bad = rec_for("Acme Widgets Inc", "Beta Parts LLC"), rec_for("Gamma Tools Inc", "Delta LLC")
+    cache = tmp_path / "cache"
+    seed(cache, E.TICKERS_URL, {"0": {"cik_str": 42, "ticker": "ACME", "title": "Acme Widgets Inc"},
+                                "1": {"cik_str": 43, "ticker": "GAM", "title": "Gamma Tools Inc"}})
+    seed(cache, E.CIK_LOOKUP_URL, b"")
+    rows = [{"accessionNumber": "0000000042-10-000002", "filingDate": "2010-02-20", "reportDate": "2009-12-31", "form": "10-K", "primaryDocument": ""}]
+    seed(cache, E.SUBMISSIONS_URL.format(cik=42), {"filings": {"recent": {k: [r[k] for r in rows] for k in rows[0]}, "files": []}})
+    seed(cache, E.FACTS_URL.format(cik=42), {"facts": {}})
+    real = E.filings
+
+    def filings(client, cik):
+        if cik == 43:
+            raise E.EdgarUnavailable("gave up on https://data.sec.gov/submissions/CIK0000000043.json after 5 tries that got 429/503")
+        return real(client, cik)
+    monkeypatch.setattr(ing.E, "filings", filings)
+    monkeypatch.setattr(ing, "load_contracts", lambda: [bad, good])
+    monkeypatch.setattr(ing, "DERIVED", tmp_path / "derived")
+    monkeypatch.setattr(ing, "REVIEW", tmp_path / "cik_review.csv")
+    monkeypatch.setattr(ing, "ROOT", tmp_path)
+    (tmp_path / "evals" / "results").mkdir(parents=True)
+    assert ing.main(["--offline", "--cache-dir", str(cache)]) == 0
+    accts = {a["cik"]: a for a in json.loads((tmp_path / "derived" / "accounts.json").read_text())}
+    assert "EdgarUnavailable" in accts[43]["error"] and accts[42]["ten_k"]["item_1a_ok"] is False
+    report = next((tmp_path / "evals" / "results").glob("ingest-edgar-*.md")).read_text()
+    assert "| Contracts that hit an error (rerun to retry) | 1 |" in report
+    assert "- the filing index names no primary document: 1" in report

@@ -50,6 +50,13 @@ def env(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "questions", lambda release: {c: f"what about {c.lower()}?" for c in C.CATEGORIES})
     monkeypatch.setattr(AS, "preconditions", lambda: [])
     monkeypatch.setattr(AB.AS, "preconditions", lambda: [])
+
+    def no_cross_encoder(name):
+        # the real cross-encoder is a Hugging Face download; tests never load it
+        if name == "cross-encoder":
+            raise RuntimeError("the cross-encoder is not loaded in tests")
+        return None
+    monkeypatch.setattr(AB, "make_reranker", no_cross_encoder)
     monkeypatch.setattr(AS, "make_embedding_function", lambda arm: (HashEmbedding(), "hash-test"))
     monkeypatch.setattr(AS, "over_limit", lambda texts, arm: None)
     docs = [contract_doc(rec)]
