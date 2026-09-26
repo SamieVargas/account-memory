@@ -74,6 +74,11 @@ Check a box as each step is done, and commit what the step says to commit.
 
 ## 6. Write the golden set (before any retrieval run)
 
+- [ ] Easiest in the notebook: `pip install notebook`, then
+  `python -m notebook notebooks/golden_workbench.ipynb`. It loads the data,
+  looks up spans and offsets, checks each question as you add it, and saves
+  `evals/golden.jsonl`. The steps below do the same from the command line.
+
 - [ ] Look things up with the helper. It reads data only, so it doesn't
   count as a retrieval run.
   ```bash

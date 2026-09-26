@@ -37,6 +37,11 @@ overlap.
 
 ## Writing it
 
+`notebooks/golden_workbench.ipynb` does all of this in one place: it
+loads the selected contracts and their parsed metadata, looks up spans and
+offsets, builds each question in this format, checks it as it is added,
+and saves and validates the file. It reads data only, like the helper.
+
 `python scripts/golden_helper.py` looks things up without touching the
 index: `contracts`, `spans <id> [category]`, `find <id> "<phrase>"`,
 `revenue [cik]`, `risk <cik> "<phrase>"`, and `metadata-table` (parsed

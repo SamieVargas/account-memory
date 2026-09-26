@@ -103,6 +103,7 @@ python -m pytest                                 # no key, no network
 | `ingest.py`, `evals/auto_set.py`, `evals/ablation.py` | the ingest report; the automatic retrieval set; the Part 6 ablation |
 | `evals/records.py` | progress files and partial reports for interrupted runs |
 | `scripts/golden_helper.py`, `evals/check_golden.py`, `core/golddata.py` | writing and validating the golden set, from data only |
+| `notebooks/golden_workbench.ipynb` | the same look-ups in a notebook, with question builders that check each question as it is added |
 | `core/edgar.py` | the EDGAR client (declared User-Agent, rate limit, URL-keyed cache) and the resolution, filing, Item 1A and revenue parsers |
 | `core/parse.py`, `dates.py`, `rerank.py`, `validate.py` | copied from pixels-rag |
 | `reference/pixels_rag/` | pixels-rag modules waiting to be ported |

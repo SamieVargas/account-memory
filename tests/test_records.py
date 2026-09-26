@@ -170,3 +170,12 @@ def test_playbook_needs_all_thirty():
 def test_scaffold_playbook_lists_every_empty_heading():
     st = playbook_status((ROOT / "data" / "playbook.md").read_text(encoding="utf-8"))
     assert st["filled"] == 0 and len(st["empty"]) == 30 and st["empty"][0] == "Cap On Liability / Preferred position"
+
+
+def test_an_empty_or_invalid_golden_file_does_not_unlock_retrieval(tmp_path, monkeypatch):
+    fresh = _load("auto_set_pre", "evals/auto_set.py")
+    empty = tmp_path / "golden.jsonl"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setattr(fresh, "GOLDEN", empty)
+    problems = fresh.preconditions()
+    assert any("evals/golden.jsonl has" in p and "problem" in p for p in problems)
