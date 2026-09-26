@@ -125,6 +125,7 @@ def main(argv=None):
     methods, item1a, parents = Counter(), Counter(), Counter()
     fail_reasons = Counter()
     filings_cache = {}
+    errors, no_10k = [], Counter()
     for c in contracts:
         results, account, review = resolve_contract(c, tickers, lookup, confirmed)
         review_rows += review
@@ -132,9 +133,12 @@ def main(argv=None):
             methods[r["method"]] += 1
         rec = {"contract_id": c["id"], "title": c["title"], "resolutions": results, "account": None, "cik": None,
                "parent_filing": None, "ten_k": None}
-        if account:
-            cik = account["cik"]
-            rec.update(account=account["matched_name"], cik=cik, account_method=account["method"])
+        accounts.append(rec)
+        if not account:
+            continue
+        cik = account["cik"]
+        rec.update(account=account["matched_name"], cik=cik, account_method=account["method"])
+        try:
             if cik not in filings_cache:
                 filings_cache[cik] = E.filings(client, cik)
             rows = filings_cache[cik]
@@ -143,11 +147,18 @@ def main(argv=None):
             parents[pf["status"]] += 1
             when = c["metadata"]["agreement_date"]["value"] or c["filing_date"]
             tk = E.nearest_10k(rows, when) if when else None
-            if tk:
+            if not tk:
+                reason = E.ten_k_gap_reason(rows) if when else "no agreement or filing date to match a 10-K to"
+                rec["ten_k"] = {"skipped": reason}
+                no_10k[reason] += 1
+            else:
                 key = f"{cik}:{tk['accessionNumber']}"
                 if key not in risk:
-                    body = client.get(E.archive_url(cik, tk["accessionNumber"], tk["primaryDocument"]))
-                    ex = E.extract_item_1a(E.html_to_text(body.decode("utf-8", "replace"))) if body else {"ok": False, "reason": "document not found"}
+                    if not tk.get("primaryDocument"):
+                        ex = {"ok": False, "reason": "the filing index names no primary document"}
+                    else:
+                        body = client.get(E.archive_url(cik, tk["accessionNumber"], tk["primaryDocument"]))
+                        ex = E.extract_item_1a(E.html_to_text(body.decode("utf-8", "replace"))) if body else {"ok": False, "reason": "document not found"}
                     risk[key] = {"cik": cik, "accession": tk["accessionNumber"], "filing_date": tk["filingDate"], "form": tk["form"], **ex}
                     item1a["succeeded" if ex["ok"] else "failed"] += 1
                     if not ex["ok"]:
@@ -156,7 +167,12 @@ def main(argv=None):
                                 "item_1a_ok": risk[key]["ok"], "dated_from": "agreement_date" if c["metadata"]["agreement_date"]["value"] else "filing_date"}
             if cik not in revenue:
                 revenue[cik] = E.revenue_series(client.json(E.FACTS_URL.format(cik=cik)), cik)
-        accounts.append(rec)
+        except E.EdgarBlocked:
+            raise
+        except (E.EdgarUnavailable, OSError, ValueError) as e:
+            # one contract's failure is recorded, and the run goes on; a rerun retries it (the cache keeps the rest)
+            rec["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            errors.append((c["title"], rec["error"]))
 
     DERIVED.mkdir(parents=True, exist_ok=True)
     (DERIVED / "accounts.json").write_text(json.dumps(accounts, indent=1), encoding="utf-8")
@@ -177,14 +193,17 @@ def main(argv=None):
              f"{client.stats['cache_hits']} cache hits, rate {E.RATE}/s.", "",
              "| Measure | n |", "| --- | --- |",
              f"| Contracts with a resolved account | {len(resolved)} of {len(contracts)} ({len(resolved) / max(len(contracts), 1):.0%}) |",
-             *[f"| Names resolved by {m} | {n} |" for m, n in sorted(methods.items())],
+             *[(f"| Names unresolved | {n} |" if m == "unresolved" else f"| Names resolved by {m} | {n} |") for m, n in sorted(methods.items())],
              f"| data/cik_review.csv: decided rows kept / new rows to review | {n_decided} / {len(merged_review) - n_decided} |",
              *[f"| Parent filing {s} | {n} |" for s, n in sorted(parents.items())],
              f"| 10-Ks fetched | {sum(item1a.values())} |",
              f"| Item 1A extractions succeeded / failed | {item1a['succeeded']} / {item1a['failed']} |",
+             *[f"| Contracts with no 10-K to use: {r} | {n} |" for r, n in no_10k.most_common()],
+             f"| Contracts that hit an error (rerun to retry) | {len(errors)} |",
              f"| Companies with a revenue series | {len(with_rev)} of {len(revenue)} |",
              *[f"| Revenue concept used: {c} | {n} companies |" for c, n in concepts.most_common()],
              "", "## Item 1A failures", "", *[f"- {r}: {n}" for r, n in fail_reasons.most_common()],
+             "", "## Errors", "", *[f"- {t}: {e}" for t, e in errors],
              "", "## Unresolved contracts", "", *[f"- {a['title']}" for a in accounts if not a["cik"]]]
     out = ROOT / "evals" / "results" / f"ingest-edgar-{date.today().isoformat()}.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")

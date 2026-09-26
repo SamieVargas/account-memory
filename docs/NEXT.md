@@ -28,7 +28,9 @@ Check a box as each step is done, and commit what the step says to commit.
 
 - [ ] Smoke run on five contracts: `python scripts/ingest_edgar.py --limit 5`
 - [ ] Full run: `python scripts/ingest_edgar.py`
-  (cached, so a rerun sends nothing it already has)
+  (cached, so a rerun sends nothing it already has). If the report lists
+  errors, rerun it; only those are retried. If it stops on a 403, check
+  `EDGAR_USER_AGENT` in `.env`, wait ten minutes, and rerun.
 - [ ] Read `evals/results/ingest-edgar-<date>.md`: match rate, names by
   method, parent filings, Item 1A succeeded and failed, companies with
   revenue, the revenue concept used.

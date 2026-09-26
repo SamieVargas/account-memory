@@ -74,11 +74,19 @@ class PrefixedSentenceTransformer(EmbeddingFunction):
     """A sentence-transformers model with the query and document prefixes
     its training expects, normalized for cosine."""
 
-    def __init__(self, model: str, query_prefix: str = "", doc_prefix: str = "", _model=None):
-        if _model is None:
+    def __init__(self, model: str, query_prefix: str = "", doc_prefix: str = "", _model=None, load: bool = True):
+        """Loads the model now unless `load` is False (Chroma rebuilding the
+        function from a stored config), in which case the first encode does."""
+        self.model_name, self.query_prefix, self.doc_prefix, self._model = model, query_prefix, doc_prefix, _model
+        if load:
+            self.model
+
+    @property
+    def model(self):
+        if self._model is None:
             from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer(model)
-        self.model_name, self.query_prefix, self.doc_prefix, self.model = model, query_prefix, doc_prefix, _model
+            self._model = SentenceTransformer(self.model_name)
+        return self._model
 
     def _encode(self, texts):
         return [list(map(float, v)) for v in self.model.encode(list(texts), normalize_embeddings=True)]
@@ -98,7 +106,7 @@ class PrefixedSentenceTransformer(EmbeddingFunction):
 
     @staticmethod
     def build_from_config(config):
-        return PrefixedSentenceTransformer(config["model"], config["query_prefix"], config["doc_prefix"])
+        return PrefixedSentenceTransformer(config["model"], config["query_prefix"], config["doc_prefix"], load=False)
 
     @staticmethod
     def validate_config(config):

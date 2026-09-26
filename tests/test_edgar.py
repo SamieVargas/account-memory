@@ -9,8 +9,8 @@ from core import edgar as E
 
 
 class FakeResponse:
-    def __init__(self, status, body=b""):
-        self.status_code, self.content = status, body
+    def __init__(self, status, body=b"", headers=None):
+        self.status_code, self.content, self.headers = status, body, headers or {}
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -165,3 +165,33 @@ def test_cik_lookup_parse(tmp_path):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(gzip.compress(body))
     assert E.load_cik_lookup(c) == [{"cik": 1438823, "name": "!J INC"}, {"cik": 1065860, "name": "LIME ENERGY CO."}]
+
+
+def test_client_honors_retry_after_then_gives_up_without_caching(tmp_path, monkeypatch):
+    slept = []
+    monkeypatch.setattr(E.time, "sleep", lambda s: slept.append(s))
+    s = FakeSession([FakeResponse(429, headers={"Retry-After": "7"}), FakeResponse(200, b"ok")])
+    c = E.EdgarClient("A Person a@example.com", cache_dir=tmp_path, session=s)
+    assert c.get("https://www.sec.gov/a") == b"ok" and 7.0 in slept
+    s = FakeSession([FakeResponse(503)] * (len(E.BACKOFF_S) + 1))
+    c = E.EdgarClient("A Person a@example.com", cache_dir=tmp_path, session=s)
+    with pytest.raises(E.EdgarUnavailable):
+        c.get("https://www.sec.gov/b")
+    assert not c._path("https://www.sec.gov/b").exists() and len(s.calls) == len(E.BACKOFF_S) + 1
+
+
+def test_client_stops_on_403(tmp_path):
+    c = E.EdgarClient("A Person a@example.com", cache_dir=tmp_path, session=FakeSession([FakeResponse(403)]))
+    with pytest.raises(E.EdgarBlocked, match="User-Agent"):
+        c.get("https://www.sec.gov/c")
+
+
+def test_nearest_10k_skips_filings_before_item_1a():
+    old = [{"accessionNumber": "a", "filingDate": "1998-03-01", "reportDate": "1997-12-31", "form": "10-K", "primaryDocument": ""},
+           {"accessionNumber": "b", "filingDate": "2005-12-20", "reportDate": "2005-09-30", "form": "10-K", "primaryDocument": "b.htm"}]
+    assert E.nearest_10k(old, "1998-06-01") is None
+    assert "before 2005-12-01" in E.ten_k_gap_reason(old)
+    assert E.ten_k_gap_reason([]) == "no 10-K on file"
+    new = old + [{"accessionNumber": "c", "filingDate": "2006-03-01", "reportDate": "2005-12-31", "form": "10-K", "primaryDocument": "c.htm"}]
+    tk = E.nearest_10k(new, "1998-06-01")
+    assert tk["accessionNumber"] == "c" and tk["gap_days"] > 2700

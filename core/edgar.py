@@ -60,6 +60,26 @@ ANNUAL_FORMS = ("10-K", "10-K/A", "10-K405", "10-KT")
 TEN_K_FORMS = ("10-K", "10-K405")  # Item 1A exists in 10-Ks for fiscal years ending on or after 2005-12-01
 
 
+# Waits after a 429 or 503 when the SEC sends no Retry-After, in seconds.
+BACKOFF_S = (10, 30, 60, 120)
+
+
+class EdgarUnavailable(RuntimeError):
+    """The SEC kept answering 429/503 for one URL."""
+
+
+class EdgarBlocked(RuntimeError):
+    """The SEC answered 403: undeclared User-Agent or over the rate limit."""
+
+
+def _retry_after(response) -> float | None:
+    v = (getattr(response, "headers", None) or {}).get("Retry-After")
+    try:
+        return min(float(v), 600.0) if v is not None else None
+    except ValueError:
+        return None
+
+
 class EdgarClient:
     def __init__(self, user_agent=None, *, rate=RATE, cache_dir=CACHE, offline=False, session=None):
         ua = user_agent or os.environ.get("EDGAR_USER_AGENT", "")
@@ -91,7 +111,8 @@ class EdgarClient:
         if self.session is None:
             import requests
             self.session = requests.Session()
-        for attempt in range(4):
+        body, r = None, None
+        for attempt in range(len(BACKOFF_S) + 1):
             wait = self._last + self.interval - time.time()
             if wait > 0:
                 time.sleep(wait)
@@ -101,15 +122,19 @@ class EdgarClient:
             if r.status_code == 404:
                 body = b"__404__"
                 break
+            if r.status_code == 403:
+                raise EdgarBlocked(f"403 from {url}: the SEC refuses requests without a declared User-Agent or above its rate "
+                                   "limit; check EDGAR_USER_AGENT, wait ten minutes, and rerun (the cache keeps what finished)")
             if r.status_code in (429, 503):
                 self.stats["errors"] += 1
-                time.sleep(2 ** (attempt + 1))
+                if attempt < len(BACKOFF_S):
+                    time.sleep(_retry_after(r) or BACKOFF_S[attempt])
                 continue
             r.raise_for_status()
             body = r.content
             break
-        else:
-            raise RuntimeError(f"gave up on {url} after repeated 429/503")
+        if body is None:
+            raise EdgarUnavailable(f"gave up on {url} after {len(BACKOFF_S) + 1} tries that got 429/503")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(gzip.compress(body))
         return None if body == b"__404__" else body
@@ -239,15 +264,32 @@ def parent_filing(rows: list[dict], filing_date, form=None) -> dict:
     return {"status": "ambiguous" if hits else "not_found", "candidates": len(hits)}
 
 
+ITEM_1A_FROM = "2005-12-01"  # Item 1A is required for fiscal years ending on or after this date
+
+
+def _period(r) -> str:
+    """The fiscal period a 10-K reports on: its reportDate, else its filing date."""
+    return r.get("reportDate") or r["filingDate"]
+
+
 def nearest_10k(rows: list[dict], when: str) -> dict | None:
-    """The 10-K filed closest to `when`, with the gap in days. Ties go to the
-    later filing."""
+    """The 10-K that can carry an Item 1A (fiscal period ending on or after
+    ITEM_1A_FROM) filed closest to `when`, with the gap in days. Earlier
+    10-Ks have no Item 1A, so they are never fetched. Ties go to the later
+    filing. None when the company has no such 10-K; `ten_k_gap_reason`
+    says why."""
     target = date.fromisoformat(when)
-    tenks = [r for r in rows if r["form"] in TEN_K_FORMS and r["filingDate"]]
+    tenks = [r for r in rows if r["form"] in TEN_K_FORMS and r["filingDate"] and _period(r) >= ITEM_1A_FROM]
     if not tenks:
         return None
     best = min(tenks, key=lambda r: (abs((date.fromisoformat(r["filingDate"]) - target).days), -date.fromisoformat(r["filingDate"]).toordinal()))
     return {**best, "gap_days": (date.fromisoformat(best["filingDate"]) - target).days}
+
+
+def ten_k_gap_reason(rows: list[dict]) -> str:
+    if any(r["form"] in TEN_K_FORMS for r in rows):
+        return f"only 10-Ks for periods before {ITEM_1A_FROM}, which have no Item 1A"
+    return "no 10-K on file"
 
 
 def archive_url(cik: int, accession: str, doc: str) -> str:

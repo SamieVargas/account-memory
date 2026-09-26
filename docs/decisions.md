@@ -182,3 +182,23 @@ import the store, the retriever or an embedder (a test checks that), so
 looking up offsets while writing questions is not a retrieval run. The line
 format gained `expected_contract_ids` for filter questions, which
 `evals/GOLDEN.md` described but gave no field for.
+
+## The 10-K used for Item 1A is the nearest one that can have an Item 1A
+
+The brief says to take the 10-K closest to the contract's date. Item 1A is
+required only for fiscal years ending on or after 2005-12-01, and many CUAD
+contracts are from the late 1990s, so the closest 10-K often has no Item 1A
+at all (the first real run asked for a 1998 filing whose index also named
+no primary document). `nearest_10k` now picks the closest 10-K whose
+reported period ends on or after that date, and records the gap in days,
+which can be years. A company with only older 10-Ks is counted in the
+ingest report as having no 10-K to use, and nothing is fetched for it.
+
+## One failed contract does not stop the EDGAR ingest
+
+A URL the SEC keeps answering with 429 or 503 (after waiting as long as its
+Retry-After header asks, or 10, 30, 60 and 120 seconds) is recorded against
+that contract and the run goes on; the report lists the errors, and a rerun
+retries only those, because everything else is cached. A 403 stops the
+run: the SEC sends it for a missing User-Agent or for going over its rate,
+and continuing would only extend the block.
