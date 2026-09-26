@@ -24,14 +24,34 @@
 
 ## Result
 
-Not run yet: step 3 needs `scripts/ingest_edgar.py`, which needs the SEC's
-servers (unreachable from the session that set this repo up). Once it runs,
-record here the candidate count per tier, the selected count per tier and
-type, and the match rate (selected contracts in tiers A and B over 80).
+Run on 2026-09-25 against the EDGAR ingest of the same day
+(`evals/results/ingest-edgar-2026-09-25.md`), seed 20260923.
 
-If the match rate is low, the brief's time box applies: shrink the subset to
-the contracts that resolved rather than chasing more matches, and record the
-new target here.
+| Tier | Candidates | Selected |
+| --- | --- | --- |
+| A: account resolved, revenue series | 96 | 80 |
+| B: account resolved, no revenue | 89 | 0 |
+| C: unresolved | 6 | 0 |
+| Total | 191 | 80 |
+
+Match rate of the selection: 80 of 80 (100%); every selected contract has
+a resolved account with an annual revenue series. Across all 238 commercial
+contracts the match rate is 229 of 238 (96%).
+
+| Contract type | Selected |
+| --- | --- |
+| distributor | 15 (the per-type cap) |
+| license | 14 |
+| supply | 14 |
+| services | 12 |
+| reseller | 7 |
+| maintenance | 6 |
+| manufacturing | 5 |
+| outsourcing | 4 |
+| hosting | 3 |
+
+The time box did not bite: tier A alone had more than enough contracts, so
+no one chased more matches. The subset is `data/selection.json`.
 
 `--provisional` selects with every candidate in tier C, for development
 before EDGAR has run. A provisional selection is marked as such in the JSON

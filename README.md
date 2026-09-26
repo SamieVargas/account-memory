@@ -19,11 +19,11 @@ set are written.
 | Provenance: pixels-rag modules copied, source commit recorded | done, `docs/PROVENANCE.md` |
 | CUAD fetch, records, spans to offsets, metadata, ingest report | done, `core/cuad.py`, `scripts/cuad_report.py` |
 | 1. Versioned, incremental ingest with freshness status | done, `core/store.py`, `ingest.py`; smoke-tested with MiniLM on 10 contracts |
-| 2. EDGAR: CIK resolution, parent filings, Item 1A, revenue table | code and fixture tests; **not run**, sec.gov was unreachable from the setup session |
+| 2. EDGAR: CIK resolution, parent filings, Item 1A, revenue table | run 2026-09-25: 229 of 238 contracts resolved, 161 parent filings linked, Item 1A from 109 of 127 10-Ks, revenue for 97 companies; `evals/results/ingest-edgar-2026-09-25.md` |
 | 3. Fixed and section-aware chunkers | done, `core/chunking.py`; counts in `evals/results/ingest-2026-09-23-dry.md` |
 | 4. Automatic retrieval set | harness done, `evals/auto_set.py`; **not run**, waits on the golden set and playbook |
 | 5. Hybrid BM25 plus dense with reciprocal rank fusion | done, `core/retrieve.py`, `--hybrid`; **not run** |
-| Contract subset | rule written, `data/SELECTION.md`; waits on the EDGAR run |
+| Contract subset | 80 contracts, all with a resolved account and a revenue series; `data/SELECTION.md` |
 | Playbook | headings only, `data/playbook.md`; Samie writes the 30 positions (runs refuse until all 30 have text and list the empty ones) |
 | Golden set | format, mix and checks in `evals/GOLDEN.md`; `scripts/golden_helper.py` to write it, `evals/check_golden.py` to validate it; Samie writes the 40 |
 | 6. Embedding arms (MiniLM, bge-small, e5-small) and cross-encoder rerank | harness done, `evals/ablation.py`; **not run**: needs the golden set, and Hugging Face was unreachable from this session |
@@ -44,6 +44,18 @@ hard kill, `--from-progress <file>` rebuilds that report.
 The steps left to run, in order, are in `docs/NEXT.md`.
 
 ## Numbers so far
+
+From `evals/results/ingest-edgar-2026-09-25.md`, the 238 commercial contracts:
+
+| Measure | n |
+| --- | --- |
+| Contracts with a resolved account | 229 (96%) |
+| Parent filing resolved / ambiguous / not found / no date | 161 / 45 / 9 / 14 |
+| 10-Ks fetched; Item 1A extracted | 127; 109 |
+| Item 1A not extracted: company gives none (smaller reporting company, omitted, none known) / parse miss | 17 / 1 |
+| Contracts with no 10-K to use (none on file / only pre-2006 / no date) | 67 / 15 / 4 |
+| Companies with an annual revenue series | 97 of 201 |
+
 
 From `evals/results/ingest-cuad-2026-09-23.md`, no model, no embedding:
 
