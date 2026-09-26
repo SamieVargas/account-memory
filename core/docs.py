@@ -56,27 +56,40 @@ N_CATEGORIES = 10
 OPTIONAL_SECTION = re.compile(r"filing-data", re.I)
 
 
+def heading_name(h: str) -> str:
+    """A heading as the checks compare it: '1. Cap On Liability' and
+    '**Preferred position:**' read as 'Cap On Liability' and 'Preferred position'."""
+    h = re.sub(r"^\d+[.)]\s*", "", h.strip().strip("*_").strip())
+    return h.rstrip(":").strip().strip("*_").rstrip(":").strip()
+
+
 def playbook_status(text: str) -> dict:
     """Which of the 30 required position headings (three under each of the
     ten category headings) have text under them. The optional filing-data
     section does not count. A position heading that is missing counts as
     empty."""
-    cats, cur = {}, None
+    cats, cur, misplaced = {}, None, []
     for block in re.split(r"(?=^#{2,3} )", text, flags=re.M):
         m = re.match(r"^(#{2,3}) (.+?)\s*$", block, flags=re.M)
         if not m:
             continue
         body = block[m.end():].strip()
-        if m[1] == "##":
-            cur = None if OPTIONAL_SECTION.search(m[2]) else m[2].strip()
+        name = heading_name(m[2])
+        if m[1] == "##" and name in POSITIONS and cur:
+            # '## Escalate if' under a category: a typo for '###', not an 11th category
+            misplaced.append(f"'## {m[2].strip()}' under {cur} should be '### {name}'")
+            cats[cur][name] = bool(body)
+        elif m[1] == "##":
+            cur = None if OPTIONAL_SECTION.search(m[2]) else name
             if cur:
                 cats[cur] = {}
         elif cur:
-            cats[cur][m[2].strip()] = bool(body)
+            cats[cur][name] = bool(body)
     empty = [f"{c} / {p}" for c, pos in cats.items() for p in POSITIONS if not pos.get(p)]
     expected = N_CATEGORIES * len(POSITIONS)
     filled = sum(1 for pos in cats.values() for p in POSITIONS if pos.get(p))
     problems = [] if len(cats) == N_CATEGORIES else [f"{len(cats)} category headings, expected {N_CATEGORIES}"]
+    problems += misplaced
     return {"categories": list(cats), "expected": expected, "filled": filled, "empty": empty, "problems": problems,
             "complete": not problems and filled == expected}
 

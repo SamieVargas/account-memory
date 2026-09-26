@@ -168,8 +168,29 @@ def test_playbook_needs_all_thirty():
 
 
 def test_scaffold_playbook_lists_every_empty_heading():
-    st = playbook_status((ROOT / "data" / "playbook.md").read_text(encoding="utf-8"))
+    scaffold = "\n".join(f"## {c}\n\n### Preferred position\n\n### Acceptable fallback\n\n### Escalate if\n"
+                         for c in ["Cap On Liability"] + [f"Category {i}" for i in range(9)])
+    st = playbook_status(scaffold)
     assert st["filled"] == 0 and len(st["empty"]) == 30 and st["empty"][0] == "Cap On Liability / Preferred position"
+
+
+def test_numbered_categories_and_colons_count():
+    text = _playbook().replace("## Category 0", "## 1. Category 0").replace("### Escalate if\n", "### Escalate if:\n")
+    text = text.replace("### Preferred position\nText for 1", "### **Preferred position:**\nText for 1")
+    st = playbook_status(text)
+    assert st["complete"] and st["categories"][0] == "Category 0"
+
+
+def test_a_position_at_category_level_is_named_not_counted_as_a_category():
+    text = _playbook().replace("### Escalate if\nText for 2", "## Escalate if:\nText for 2")
+    st = playbook_status(text)
+    assert not st["complete"] and len(st["categories"]) == 10
+    assert st["problems"] == ["'## Escalate if:' under Category 2 should be '### Escalate if'"]
+
+
+def test_the_committed_playbook_parses():
+    st = playbook_status((ROOT / "data" / "playbook.md").read_text(encoding="utf-8"))
+    assert len(st["categories"]) == 10 and not [p for p in st["problems"] if "category headings" in p]
 
 
 def test_an_empty_or_invalid_golden_file_does_not_unlock_retrieval(tmp_path, monkeypatch):
