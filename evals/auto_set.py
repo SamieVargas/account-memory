@@ -38,6 +38,7 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "evals"))
 
+from core import runlog  # noqa: E402
 from core import store as S  # noqa: E402
 from core.chunking import CHUNKERS  # noqa: E402
 from core.cuad import METADATA_CATEGORIES, load_contracts, load_release, questions  # noqa: E402
@@ -199,11 +200,13 @@ def main(argv=None):
             "embedding_model": model, "contracts": len(contract_ids), "n_queries": len(queries), "golden_hash": file_hash(GOLDEN),
             "playbook_hash": file_hash(PLAYBOOK), "over_limit": over_limit((c["text"] for c in chunks), args.embedding)}
     stem = f"{meta['date']}-auto-{args.chunker}-{mode}" + (f"-{args.rerank}" if reranker else "")
+    runlog.status(f"{len(queries)} queries, chunker {args.chunker}, mode {mode}, reranker {args.rerank}; progress in {stem}.progress.jsonl")
     rows = []
     with Recorder(args.out, stem, meta) as rec:
         try:
             run(queries, collection=collection, bm25=bm25, mode=mode, reranker=reranker, rows=rows,
-                on_row=lambda r: rec.append({"type": "query", "row": r}))
+                on_row=lambda r: (rec.append({"type": "query", "row": r}),
+                                  runlog.progress(len(rows), len(queries), "queries", every=25)))
         except BaseException as e:
             summary = summarize(rows)
             why = "interrupted" if isinstance(e, KeyboardInterrupt) else f"{type(e).__name__}: {str(e)[:120]}"
@@ -222,4 +225,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "auto_set"))

@@ -29,6 +29,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
+from core import runlog  # noqa: E402
 from core import store as S  # noqa: E402
 from core.chunking import CHUNKERS, FIXED_OVERLAP, FIXED_TOKENS, SECTION_MAX, SECTION_MIN, chunk_document  # noqa: E402
 from core.cuad import COMMERCIAL_TYPES, load_contracts  # noqa: E402
@@ -126,19 +127,26 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true", help="chunk and report, embed nothing")
     args = ap.parse_args(argv)
     chunkers = CHUNKERS if args.chunker == "both" else (args.chunker,)
+    runlog.status("gathering documents: contracts, Item 1A sections, playbook")
     docs, records, source = gather_docs(args.candidates)
     model = ARMS[args.embedding]["model"]
+    runlog.status(f"{len(docs)} documents ({source}); embedding model {model}")
     if args.status:
         for ch in chunkers:
             print(json.dumps(S.status(args.db, docs, chunker=ch, embedding_model=model), indent=1))
         return 0
     results = {}
+    if not args.dry_run:
+        runlog.status(f"loading {model} (downloaded once, then cached)")
     ef = None if args.dry_run else make_embedding_function(args.embedding)[0]
     for ch in chunkers:
+        runlog.status(f"chunker {ch}: {'chunking' if args.dry_run else 'chunking and embedding'}")
         if args.dry_run:
             results[ch] = {"chunks": [c for d in docs for c in chunk_document(d, ch)]}
         else:
-            r = S.ingest(args.db, docs, chunker=ch, embedding_function=ef, embedding_model=model, prune=args.prune)
+            r = S.ingest(args.db, docs, chunker=ch, embedding_function=ef, embedding_model=model, prune=args.prune,
+                         on_doc=lambda i, n, rep, ch=ch: runlog.progress(i, n, f"documents ({ch})", every=10,
+                                                                          extra=f"{rep['chunks_added']} chunks embedded, {rep['unchanged']} unchanged"))
             results[ch] = {"ingest": r, "chunks": S.read_chunks(args.db, ch)}
     out, lines = report(docs, records, source, results, model, args.dry_run, args.embedding)
     print("\n".join(lines))
@@ -147,4 +155,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "ingest"))

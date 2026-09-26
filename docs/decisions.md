@@ -40,7 +40,9 @@ request instead of one per name, and it can be matched offline and tested.
 The method recorded for those matches is `edgar_name_index_exact` or
 `edgar_name_index_fuzzy`.
 
-## Matching is on a compact key
+## Matching is on a compact key, exact before close, with guards
+
+(Revised after the first real run, 2026-09-25.)
 
 CUAD filer names are squashed ("LIMEENERGYCO"), so names on both sides are
 reduced to lowercase letters and digits with one trailing corporate suffix
@@ -202,3 +204,37 @@ that contract and the run goes on; the report lists the errors, and a rerun
 retries only those, because everything else is cached. A 403 stops the
 run: the SEC sends it for a missing User-Agent or for going over its rate,
 and continuing would only extend the block.
+
+## Name matching after the first real run
+
+The first full run accepted "HF Enterprises" as SHF Enterprises LLC (a
+different company, score 0.96) and Apollo Endosurgery as its US
+subsidiary. Three changes:
+
+- Exact matches are tried in both the tickers file and EDGAR's name index
+  before any close spelling. Before, a close spelling in the tickers file
+  could win over an exact name in the index.
+- A close spelling is accepted only when both names share their first three
+  characters, so a prefix that differs (HF, SHF) goes to review instead.
+- An exact name that belongs to more than one CIK (a parent and a
+  subsidiary, a name reused after a merger) is never settled
+  automatically: every CIK for it goes to review, and no close spelling is
+  accepted for that name either.
+
+## The review sheet holds only names that decide a contract's company
+
+The first run wrote 226 rows, most of them parties matched after the filer
+had already decided the account. Now a row is written only when confirming
+it could change the account: candidates for names ranked above the name
+that decided it (all names when nothing resolved), plus the deciding name
+itself when it was accepted on a close spelling. That last kind is written
+with `confirmed` = `auto`; changing it to `no` rejects the match on the next
+run, and the account moves to the next name.
+
+## Item 1A failures carry the start of the section
+
+A short Item 1A is usually a company choosing not to give risk factors,
+which smaller reporting companies may do. The report now labels those
+"not provided" when the text says so, and lists every failure with the
+company, the filing date and the first 160 characters of what the section
+held, so each one can be checked by eye.
