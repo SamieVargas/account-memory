@@ -30,7 +30,7 @@ The counterparty tries to make _ordinary_ breaches like standard service-level a
 Either party can terminate the agreement for convenience at any time by giving **30 days written notice**, with no financial penalty other than paying for services for software already delivered up to that termination date. 
 ### Acceptable fallback: 
 Termination of convenience is permitted with 60 to 90 days notice, plus manditory reimbursement of the counterparty's actual, non-recoverable, out-of-pocket setup costs (e.g., custom engineering, pre-purchased hardware). 
-## Escalate if:
+### Escalate if:
 Only the counterparty retains the right to walk away while the party is locked-in, or if terminating early triggers a punitive financial penalty (e.g., paying 100% of the remaining contract value). 
 
 ## 4. Renewal Term
