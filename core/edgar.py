@@ -181,12 +181,21 @@ def load_cik_lookup(client: EdgarClient) -> list[dict]:
     return out
 
 
+SAME_START = 3  # close spellings must share their first 3 characters (compact key)
+
+
 class NameIndex:
     def __init__(self, rows: list[dict]):
         self.by_key = {}
         for r in rows:
             self.by_key.setdefault(compact_key(r["name"]), []).append(r)
         self.keys = list(self.by_key)
+        # Close spellings are only ever compared within the same first
+        # SAME_START characters, so the million-name index is searched one
+        # small bucket at a time instead of whole.
+        self.by_prefix = {}
+        for k in self.keys:
+            self.by_prefix.setdefault(k[:SAME_START], []).append(k)
 
     def exact(self, name):
         rows = self.by_key.get(compact_key(name), [])
@@ -207,14 +216,11 @@ class NameIndex:
         if len(k) < 5:
             return []
         out = []
-        for cand in difflib.get_close_matches(k, self.keys, n=n, cutoff=REVIEW):
+        for cand in difflib.get_close_matches(k, self.by_prefix.get(k[:SAME_START], []), n=n, cutoff=REVIEW):
             ciks = {r["cik"] for r in self.by_key[cand]}
             if len(ciks) == 1:
                 out.append((round(difflib.SequenceMatcher(None, k, cand).ratio(), 4), self.by_key[cand][0]))
         return out
-
-
-SAME_START = 3  # a fuzzy match is only accepted when the two keys share their first 3 characters
 
 
 def same_start(a: str, b: str) -> bool:

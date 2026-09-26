@@ -207,7 +207,7 @@ def test_exact_anywhere_beats_a_close_spelling_in_tickers():
 def test_a_different_first_letter_is_not_a_typo():
     lookup = E.NameIndex([{"cik": 5, "name": "SHF ENTERPRISES LLC"}])
     r = E.resolve_name("HfEnterprisesInc", E.NameIndex([]), lookup)
-    assert r["cik"] is None and [(x["cik"], x["method"]) for x in r["review"]] == [(5, "edgar_name_index_fuzzy")]
+    assert r["cik"] is None and r["review"] == []   # a different start is not even compared
     assert E.same_start("Blackstone GSO Long-Short", "Blackstone Long-Short") and not E.same_start("HF Enterprises", "SHF Enterprises")
 
 

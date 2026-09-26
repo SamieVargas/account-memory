@@ -238,3 +238,12 @@ which smaller reporting companies may do. The report now labels those
 "not provided" when the text says so, and lists every failure with the
 company, the filing date and the first 160 characters of what the section
 held, so each one can be checked by eye.
+
+## Close spellings are searched within the same three-letter prefix
+
+The second full run took 20 minutes with every response cached: each
+unresolved name was compared with all of EDGAR's million names. Since a
+close spelling is only ever accepted with the same first three characters,
+the index now keeps the names bucketed by that prefix and compares within
+the bucket. A name with a different start is no longer even offered for
+review, which is the same call the acceptance rule already made.
