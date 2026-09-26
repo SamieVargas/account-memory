@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from core import runlog  # noqa: E402
 from core.cuad import COMMERCIAL_TYPES, METADATA_CATEGORIES, load_contracts  # noqa: E402
 
 SEED = 20260923
@@ -79,7 +80,9 @@ def main(argv=None):
     else:
         print("no EDGAR data: run scripts/ingest_edgar.py first, or pass --provisional")
         return 1
+    runlog.status("loading CUAD and the EDGAR accounts")
     cands = candidates(load_contracts())
+    runlog.status(f"{len(cands)} candidates; choosing {TARGET} with seed {SEED}")
     chosen, tiers = select(cands, accounts, revenue)
     resolved = sum(1 for t, _ in chosen if t < 2)
     out = {"seed": SEED, "target": TARGET, "per_type_cap": PER_TYPE_CAP, "min_clause_categories": MIN_CLAUSE_SPANS,
@@ -96,4 +99,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "select_contracts"))

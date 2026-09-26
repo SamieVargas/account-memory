@@ -23,6 +23,10 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from core import runlog  # noqa: E402
+
 RAW = ROOT / "data" / "raw" / "cuad"
 COMMIT = "67faa0e6023b04fcaae6cc09497ab00e5d63a2a2"
 BASE = f"https://raw.githubusercontent.com/TheAtticusProject/cuad/{COMMIT}"
@@ -76,7 +80,9 @@ def main(argv=None):
     RAW.mkdir(parents=True, exist_ok=True)
     if not args.check:
         for name in FILES:
+            runlog.status(f"fetching {name} (pinned commit {COMMIT[:7]})")
             fetch(name)
+        runlog.status("unzipping data.zip")
         with zipfile.ZipFile(RAW / "data.zip") as z:
             z.extractall(RAW)
     problems = check()
@@ -89,4 +95,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "fetch_cuad"))

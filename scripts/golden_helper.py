@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core import golddata as G  # noqa: E402
+from core import runlog  # noqa: E402
 
 CONTEXT = 60
 
@@ -128,7 +129,7 @@ def main(argv=None, out=None):
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        sys.exit(runlog.run(main, "golden_helper"))
     except BrokenPipeError:  # piped into head
         sys.stderr.close()
         sys.exit(0)

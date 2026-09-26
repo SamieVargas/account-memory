@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core import golddata as G  # noqa: E402
+from core import runlog  # noqa: E402
 from core.cuad import CATEGORIES  # noqa: E402
 
 GOLDEN = ROOT / "evals" / "golden.jsonl"
@@ -173,4 +174,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "check_golden"))

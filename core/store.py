@@ -95,11 +95,12 @@ def _add(coll, chunks):
 
 
 def ingest(db, docs: list[dict], *, chunker: str, embedding_function=None, embedding_model: str = ARMS[DEFAULT_ARM]["model"],
-           prune: bool = False, client=None) -> dict:
+           prune: bool = False, client=None, on_doc=None) -> dict:
     """Upsert `docs` into the chunker's collection. A document whose content
     hash is unchanged is skipped; a changed one has its old chunks deleted
     and its new ones added. With prune, documents in the index but not in
-    `docs` are removed. A stamp mismatch rebuilds everything."""
+    `docs` are removed. A stamp mismatch rebuilds everything. `on_doc(i, n,
+    report)` is called after each document, for progress lines."""
     client = client or make_client(db)
     manifest = read_manifest(db, chunker)
     chunks = {c["id"]: c for c in read_chunks(db, chunker)}
@@ -115,7 +116,9 @@ def ingest(db, docs: list[dict], *, chunker: str, embedding_function=None, embed
         manifest, chunks = {"stamp": None, "docs": {}}, {}
         report["rebuilt"] = True
     seen = set()
-    for doc in docs:
+    for i, doc in enumerate(docs, start=1):
+        if on_doc:
+            on_doc(i, len(docs), report)
         seen.add(doc["id"])
         h = content_hash(doc)
         old = manifest["docs"].get(doc["id"])

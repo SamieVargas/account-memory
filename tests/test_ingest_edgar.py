@@ -69,10 +69,11 @@ def test_review_decisions_survive_reruns(tmp_path, monkeypatch):
         {"id": "x__Parties", "question": "q", "answers": [{"text": "Betta Part LLC", "answer_start": text.index("Betta")}]}]}]}
     rec = C.build_record(entry)
     cache = tmp_path / "cache"
-    seed(cache, E.TICKERS_URL, {"0": {"cik_str": 42, "ticker": "ACME", "title": "Acme Widgets Inc"}})
+    # the filer resolves nowhere, so the borderline party is what decides the account
+    seed(cache, E.TICKERS_URL, {"0": {"cik_str": 99, "ticker": "ZZZ", "title": "Unrelated Holdings Inc"}})
     seed(cache, E.CIK_LOOKUP_URL, b"BETA PARTS LLC:0000000077:\n")
-    seed(cache, E.SUBMISSIONS_URL.format(cik=42), {"filings": {"recent": {}, "files": []}})
-    seed(cache, E.FACTS_URL.format(cik=42), {"facts": {}})
+    seed(cache, E.SUBMISSIONS_URL.format(cik=77), {"filings": {"recent": {}, "files": []}})
+    seed(cache, E.FACTS_URL.format(cik=77), {"facts": {}})
     review = tmp_path / "cik_review.csv"
     monkeypatch.setattr(ing, "load_contracts", lambda: [rec])
     monkeypatch.setattr(ing, "DERIVED", tmp_path / "derived")
@@ -146,3 +147,35 @@ def test_one_bad_contract_does_not_stop_the_run(tmp_path, monkeypatch):
     report = next((tmp_path / "evals" / "results").glob("ingest-edgar-*.md")).read_text()
     assert "| Contracts that hit an error (rerun to retry) | 1 |" in report
     assert "- the filing index names no primary document: 1" in report
+
+
+def _names_rec(filer, parties):
+    text = f"AGREEMENT between {filer} and " + " and ".join(parties) + "."
+    qas = [{"id": "x__Parties", "question": "q", "answers": [{"text": p, "answer_start": text.index(p)} for p in parties]}]
+    return C.build_record({"title": f"{filer}_20100305_8-K_EX-10.1_1_EX-10.1_SUPPLY AGREEMENT", "paragraphs": [{"context": text, "qas": qas}]})
+
+
+def test_review_sheet_only_holds_names_that_decide_the_account():
+    lookup = E.NameIndex([{"cik": 1, "name": "ACME WIDGETS INC"}, {"cik": 77, "name": "BETA PARTS LLC"}])
+    rec = _names_rec("ACMEWIDGETSINC", ["Betta Part LLC"])
+    results, account, review = ing.resolve_contract(rec, E.NameIndex([]), lookup, {})
+    assert account["cik"] == 1 and review == []          # the filer decided it; the party's near-miss is not asked about
+    rec = _names_rec("NOBODYKNOWNINC", ["Betta Part LLC"])
+    results, account, review = ing.resolve_contract(rec, E.NameIndex([]), lookup, {})
+    assert account is None and [(r["name"], r["cik"]) for r in review] == [("Betta Part LLC", 77)]
+
+
+def test_an_accepted_close_spelling_is_on_the_sheet_and_can_be_rejected():
+    lookup = E.NameIndex([{"cik": 8, "name": "BLACKSTONE LONG SHORT CREDIT INCOME FUND"}])
+    rec = _names_rec("BLACKSTONEGSOLONGSHORTCREDITINCOMEFUND", ["Other Party Inc"])
+    results, account, review = ing.resolve_contract(rec, E.NameIndex([]), lookup, {})
+    assert account["cik"] == 8 and account["method"] == "edgar_name_index_fuzzy"
+    auto = [r for r in review if r.get("confirmed") == "auto"]
+    assert len(auto) == 1 and auto[0]["cik"] == 8
+    sheet = ing.merge_review([], review)
+    assert sheet[0]["confirmed"] == "auto" and ing.read_confirmed(sheet) == {}
+    sheet[0]["confirmed"] = "no"
+    confirmed = ing.read_confirmed(sheet)
+    results, account, review = ing.resolve_contract(rec, E.NameIndex([]), lookup, confirmed)
+    assert account is None
+    assert ing.merge_review(sheet, review)[0] == sheet[0]

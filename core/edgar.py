@@ -193,6 +193,15 @@ class NameIndex:
         ciks = {r["cik"] for r in rows}
         return rows[0] if len(ciks) == 1 else None
 
+    def ambiguous(self, name) -> list[dict]:
+        """One row per CIK when the exact key belongs to more than one filer
+        (a parent and its subsidiary, or a name reused after a merger)."""
+        rows = self.by_key.get(compact_key(name), [])
+        by_cik = {}
+        for r in rows:
+            by_cik.setdefault(r["cik"], r)
+        return list(by_cik.values()) if len(by_cik) > 1 else []
+
     def fuzzy(self, name, n=3):
         k = compact_key(name)
         if len(k) < 5:
@@ -205,21 +214,39 @@ class NameIndex:
         return out
 
 
+SAME_START = 3  # a fuzzy match is only accepted when the two keys share their first 3 characters
+
+
+def same_start(a: str, b: str) -> bool:
+    """'hfenterprises' and 'shfenterprises' score 0.96 but are different
+    companies; a prefix that differs is a different name, not a typo."""
+    ka, kb = compact_key(a), compact_key(b)
+    return ka[:SAME_START] == kb[:SAME_START]
+
+
 def resolve_name(name: str, tickers: NameIndex, lookup: NameIndex | None) -> dict:
-    """Tickers file, then EDGAR's name index, exact before fuzzy at each
-    step. Returns the match with its method and score, or the reason it is
-    unresolved, with any borderline candidates for review."""
-    review = []
-    for method, idx in (("tickers", tickers), ("edgar_name_index", lookup)):
-        if idx is None:
-            continue
+    """Exact matches first, in the tickers file and then in EDGAR's name
+    index; only then close spellings. An exact key that belongs to several
+    CIKs is never settled automatically: its candidates go to review, and no
+    close spelling is accepted for that name either. A close spelling is
+    accepted only at or above ACCEPT and with the same first characters;
+    anything else at or above REVIEW goes to review."""
+    idxs = [(m, i) for m, i in (("tickers", tickers), ("edgar_name_index", lookup)) if i is not None]
+    for method, idx in idxs:
         hit = idx.exact(name)
         if hit:
             return {"name": name, "cik": hit["cik"], "matched_name": hit["name"], "method": f"{method}_exact", "score": 1.0}
+    review, ambiguous = [], False
+    for method, idx in idxs:
+        for row in idx.ambiguous(name):
+            ambiguous = True
+            review.append({"name": name, "cik": row["cik"], "matched_name": row["name"], "method": f"{method}_exact_ambiguous", "score": 1.0})
+    for method, idx in idxs:
         for score, row in idx.fuzzy(name):
-            if score >= ACCEPT:
-                return {"name": name, "cik": row["cik"], "matched_name": row["name"], "method": f"{method}_fuzzy", "score": score}
-            review.append({"name": name, "cik": row["cik"], "matched_name": row["name"], "method": f"{method}_fuzzy", "score": score})
+            if score >= ACCEPT and not ambiguous and same_start(name, row["name"]):
+                return {"name": name, "cik": row["cik"], "matched_name": row["name"], "method": f"{method}_fuzzy", "score": score, "review": review}
+            if not any(r["cik"] == row["cik"] for r in review):
+                review.append({"name": name, "cik": row["cik"], "matched_name": row["name"], "method": f"{method}_fuzzy", "score": score})
     return {"name": name, "cik": None, "method": "unresolved", "review": review}
 
 
@@ -334,6 +361,9 @@ def html_to_text(html: str) -> str:
 _ITEM_1A = re.compile(r"^\s*item\s*1a\s*[.:\-–—]?\s*(?:risk\s+factors)?", re.I | re.M)
 _NEXT_ITEM = re.compile(r"^\s*item\s*(?:1b|1c|2)\s*[.:\-–—]?", re.I | re.M)
 MIN_ITEM_1A_CHARS = 2000
+# What a company writes in Item 1A when it gives no risk factors, which is
+# allowed for smaller reporting companies.
+NOT_PROVIDED = re.compile(r"smaller\s+reporting\s+compan|not\s+applicable|not\s+required\s+to\s+(?:provide|include)|none\.?\s*$", re.I)
 
 
 def extract_item_1a(text: str) -> dict:
@@ -354,8 +384,14 @@ def extract_item_1a(text: str) -> dict:
         return {"ok": False, "reason": "no Item 1A heading followed by an Item 1B, 1C or 2 heading"}
     start, end, body = best
     if len(body) < MIN_ITEM_1A_CHARS:
-        why = "incorporated by reference" if re.search(r"incorporated\s+(?:herein\s+)?by\s+reference", body, re.I) else f"section is {len(body)} chars"
-        return {"ok": False, "reason": why}
+        snippet = re.sub(r"\s+", " ", body)[:200]
+        if re.search(r"incorporated\s+(?:herein\s+)?by\s+reference", body, re.I):
+            why = "incorporated by reference"
+        elif NOT_PROVIDED.search(body):
+            why = "not provided (smaller reporting company or not applicable)"
+        else:
+            why = f"section is {len(body)} chars"
+        return {"ok": False, "reason": why, "snippet": snippet}
     return {"ok": True, "text": body, "start": start, "end": end, "chars": len(body)}
 
 

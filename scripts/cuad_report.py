@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from core import runlog  # noqa: E402
 from core.cuad import COMMERCIAL_TYPES, load_contracts  # noqa: E402
 
 FIELDS = ("agreement_date", "effective_date", "expiration_date", "renewal_term", "notice_period_to_terminate_renewal", "governing_law")
@@ -31,6 +32,7 @@ def section(title, rows):
 
 
 def main():
+    runlog.status("loading CUAD")
     rs = load_contracts()
     com = [r for r in rs if r["contract_type"] in COMMERCIAL_TYPES]
     today = date.today().isoformat()
@@ -57,4 +59,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(runlog.run(main, "cuad_report"))

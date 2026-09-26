@@ -34,9 +34,12 @@ Check a box as each step is done, and commit what the step says to commit.
 - [ ] Read `evals/results/ingest-edgar-<date>.md`: match rate, names by
   method, parent filings, Item 1A succeeded and failed, companies with
   revenue, the revenue concept used.
-- [ ] Open `data/cik_review.csv` and set `confirmed` to `yes` or `no` on each
-  row. Then rerun `python scripts/ingest_edgar.py`. Your decisions are kept,
-  and only new names come back blank. Repeat until nothing is left blank.
+- [ ] Open `data/cik_review.csv`. It lists only names that can change which
+  company a contract belongs to. Rows marked `auto` were matched on a close
+  spelling: leave them, or set `no` to reject one. Blank rows are
+  candidates: set `yes` or `no`. Then rerun `python scripts/ingest_edgar.py`
+  (it is all cached). Your decisions are kept. Blank rows block nothing, so
+  skip any you are unsure of.
 - [ ] If the match rate is low, don't chase it: shrink the subset to the
   contracts that resolved and write the new target in `data/SELECTION.md`.
 - [ ] Commit `data/cik_review.csv` and the EDGAR report.

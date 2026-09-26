@@ -33,6 +33,7 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from core import edgar as E  # noqa: E402
+from core import runlog  # noqa: E402
 from core.cuad import COMMERCIAL_TYPES, load_contracts  # noqa: E402
 
 DERIVED = ROOT / "data" / "derived"
@@ -75,9 +76,11 @@ def read_confirmed(rows=None) -> dict:
 
 
 def merge_review(previous: list[dict], new_candidates: list[dict]) -> list[dict]:
-    """Decided rows from `previous`, unchanged, then one blank row per new
-    (name, candidate) pair that is not already decided. Blank rows from an
-    earlier run are regenerated from this run's candidates, not carried."""
+    """Decided rows from `previous`, unchanged, then one row per new (name,
+    candidate) pair that is not already decided: blank for a candidate to
+    confirm, `auto` for a close spelling that was accepted and can be
+    rejected. Undecided rows from an earlier run are regenerated from this
+    run's candidates, not carried."""
     kept = decided_rows(previous)
     seen = {(r["name"], str(r["candidate_cik"])) for r in kept}
     out = list(kept)
@@ -87,23 +90,38 @@ def merge_review(previous: list[dict], new_candidates: list[dict]) -> list[dict]
             continue
         seen.add(key)
         out.append({"contract_id": r["contract_id"], "name": r["name"], "candidate_cik": r["cik"], "candidate_name": r["matched_name"],
-                    "method": r["method"], "score": r["score"], "confirmed": ""})
+                    "method": r["method"], "score": r["score"], "confirmed": r.get("confirmed", "")})
     return out
 
 
 def resolve_contract(c, tickers, lookup, confirmed):
+    """Every name tried for the contract, in order (footer filer, title
+    filer, then the parties), and the account: the first name that resolved.
+
+    The review rows returned are only the ones that can change the account:
+    candidates for names ranked above the one that decided it (or for every
+    name when nothing resolved), plus the decided name itself when it was
+    accepted on a close spelling, marked `auto` so it can be rejected with
+    `no`. A party matched after the filer never reaches the sheet."""
     names = [n for n in dict.fromkeys([c["filer"], c.get("title_filer")] + c["metadata"]["parties"]["value"]) if n]
-    results, review = [], []
+    results = []
     for n in names:
         if n in confirmed:
             hit = confirmed[n]
             results.append({"name": n, "cik": hit[0] if hit else None, "matched_name": hit[1] if hit else None,
                             "method": "manual_review" if hit else "unresolved"})
             continue
-        r = E.resolve_name(n, tickers, lookup)
-        results.append(r)
-        review += [{"contract_id": c["id"], **x} for x in r.get("review", [])]
-    account = next((r for r in results if r["cik"]), None)
+        results.append(E.resolve_name(n, tickers, lookup))
+    pos = next((i for i, r in enumerate(results) if r["cik"]), None)
+    account = results[pos] if pos is not None else None
+    review = []
+    for i, r in enumerate(results):
+        if pos is None or i < pos:
+            review += [{"contract_id": c["id"], **x} for x in r.get("review", [])]
+    if account and account["method"].endswith("_fuzzy"):
+        review.append({"contract_id": c["id"], "name": account["name"], "cik": account["cik"], "matched_name": account["matched_name"],
+                       "method": account["method"], "score": account["score"], "confirmed": "auto"})
+        review += [{"contract_id": c["id"], **x} for x in account.get("review", [])]
     return results, account, review
 
 
@@ -116,6 +134,7 @@ def main(argv=None):
 
     client = E.EdgarClient(offline=args.offline, cache_dir=args.cache_dir)
     contracts = [c for c in load_contracts() if c["contract_type"] in COMMERCIAL_TYPES][: args.limit]
+    runlog.status("loading the SEC tickers file and EDGAR's company-name index")
     tickers = E.NameIndex(E.load_tickers(client))
     lookup = E.NameIndex(E.load_cik_lookup(client))
     previous_review = read_review()
@@ -126,7 +145,10 @@ def main(argv=None):
     fail_reasons = Counter()
     filings_cache = {}
     errors, no_10k = [], Counter()
-    for c in contracts:
+    runlog.status(f"{len(contracts)} contracts; names indexed: {len(tickers.keys)} tickers, {len(lookup.keys)} EDGAR names")
+    for i, c in enumerate(contracts, start=1):
+        runlog.progress(i, len(contracts), "contracts", every=10,
+                        extra=f"{client.stats['requests']} requests, {client.stats['cache_hits']} from cache, {client.stats['errors']} slow-downs")
         results, account, review = resolve_contract(c, tickers, lookup, confirmed)
         review_rows += review
         for r in results:
@@ -186,6 +208,7 @@ def main(argv=None):
     n_decided = len(decided_rows(previous_review))
 
     resolved = [a for a in accounts if a["cik"]]
+    names_by_cik = {a["cik"]: a["account"] for a in resolved}
     with_rev = [r for r in revenue.values() if r["rows"]]
     concepts = Counter(c for r in with_rev for c in r["concepts_used"])
     lines = [f"# EDGAR ingest, {date.today().isoformat()}", "",
@@ -194,7 +217,8 @@ def main(argv=None):
              "| Measure | n |", "| --- | --- |",
              f"| Contracts with a resolved account | {len(resolved)} of {len(contracts)} ({len(resolved) / max(len(contracts), 1):.0%}) |",
              *[(f"| Names unresolved | {n} |" if m == "unresolved" else f"| Names resolved by {m} | {n} |") for m, n in sorted(methods.items())],
-             f"| data/cik_review.csv: decided rows kept / new rows to review | {n_decided} / {len(merged_review) - n_decided} |",
+             f"| data/cik_review.csv: decided rows kept / new rows to review | {n_decided} / {sum(1 for r in merged_review if not _decision(r))} |",
+             f"| data/cik_review.csv: close spellings accepted automatically (mark no to reject) | {sum(1 for r in merged_review if _decision(r) == 'auto')} |",
              *[f"| Parent filing {s} | {n} |" for s, n in sorted(parents.items())],
              f"| 10-Ks fetched | {sum(item1a.values())} |",
              f"| Item 1A extractions succeeded / failed | {item1a['succeeded']} / {item1a['failed']} |",
@@ -203,13 +227,17 @@ def main(argv=None):
              f"| Companies with a revenue series | {len(with_rev)} of {len(revenue)} |",
              *[f"| Revenue concept used: {c} | {n} companies |" for c, n in concepts.most_common()],
              "", "## Item 1A failures", "", *[f"- {r}: {n}" for r, n in fail_reasons.most_common()],
+             "", "| CIK | Company | Filed | Reason | Start of the section |", "| --- | --- | --- | --- | --- |",
+             *[f"| {v['cik']} | {names_by_cik.get(v['cik'], '')} | {v['filing_date']} | {v['reason']} | {(v.get('snippet') or '').replace('|', '/')[:160]} |"
+               for v in sorted((v for v in risk.values() if not v['ok']), key=lambda v: (v['reason'], v['cik']))],
              "", "## Errors", "", *[f"- {t}: {e}" for t, e in errors],
              "", "## Unresolved contracts", "", *[f"- {a['title']}" for a in accounts if not a["cik"]]]
     out = ROOT / "evals" / "results" / f"ingest-edgar-{date.today().isoformat()}.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("\n".join(lines[:20]))
+    print("\n".join(lines))
+    runlog.status(f"wrote {out.relative_to(ROOT)}, data/cik_review.csv and data/derived/")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "ingest_edgar"))

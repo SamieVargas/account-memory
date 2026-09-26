@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "evals"))
 
 import auto_set as AS  # noqa: E402
+from core import runlog  # noqa: E402
 from core import store as S  # noqa: E402
 from core.chunking import CHUNKERS  # noqa: E402
 from core.cuad import load_contracts, load_release, questions  # noqa: E402
@@ -76,6 +77,7 @@ def run_arm(arm, chunker, docs, queries_for, db_root, retrieval_arms=RETRIEVAL_A
             emit(row)
         return out
     db = Path(db_root) / arm
+    runlog.status(f"{arm} / {chunker}: building or updating its index")
     t0 = time.time()
     ing = S.ingest(db, docs, chunker=chunker, embedding_function=ef, embedding_model=model)
     build_s = round(time.time() - t0, 1)
@@ -97,8 +99,10 @@ def run_arm(arm, chunker, docs, queries_for, db_root, retrieval_arms=RETRIEVAL_A
             continue
         extra = {"build_s": build_s if ing["chunks_added"] else None, "over_limit": ol, "n_queries": len(queries)}
         live.update(base=base, rows=[], extra=extra)
+        runlog.status(f"{arm} / {chunker} / {mode}{' + ' + rname if rname else ''}: {len(queries)} queries")
         AS.run(queries, collection=coll, bm25=bm25, mode=mode, reranker=reranker, rows=live["rows"],
-               on_row=(lambda q, b=base: on_query(b, q)) if on_query else None)
+               on_row=(lambda q, b=base: (on_query(b, q), runlog.progress(len(live["rows"]), len(queries), "queries", every=50)))
+               if on_query else (lambda q: runlog.progress(len(live["rows"]), len(queries), "queries", every=50)))
         row = _result_row(base, live["rows"], extra)
         live.clear()
         out.append(row)
@@ -205,4 +209,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(runlog.run(main, "ablation"))

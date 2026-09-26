@@ -195,3 +195,33 @@ def test_nearest_10k_skips_filings_before_item_1a():
     new = old + [{"accessionNumber": "c", "filingDate": "2006-03-01", "reportDate": "2005-12-31", "form": "10-K", "primaryDocument": "c.htm"}]
     tk = E.nearest_10k(new, "1998-06-01")
     assert tk["accessionNumber"] == "c" and tk["gap_days"] > 2700
+
+
+def test_exact_anywhere_beats_a_close_spelling_in_tickers():
+    tickers = E.NameIndex([{"cik": 1, "name": "Apollo Endosurgeri Inc"}])
+    lookup = E.NameIndex([{"cik": 2, "name": "APOLLO ENDOSURGERY INC"}])
+    r = E.resolve_name("Apollo Endosurgery", tickers, lookup)
+    assert (r["cik"], r["method"]) == (2, "edgar_name_index_exact")
+
+
+def test_a_different_first_letter_is_not_a_typo():
+    lookup = E.NameIndex([{"cik": 5, "name": "SHF ENTERPRISES LLC"}])
+    r = E.resolve_name("HfEnterprisesInc", E.NameIndex([]), lookup)
+    assert r["cik"] is None and [(x["cik"], x["method"]) for x in r["review"]] == [(5, "edgar_name_index_fuzzy")]
+    assert E.same_start("Blackstone GSO Long-Short", "Blackstone Long-Short") and not E.same_start("HF Enterprises", "SHF Enterprises")
+
+
+def test_ambiguous_exact_goes_to_review_and_blocks_close_spellings():
+    lookup = E.NameIndex([{"cik": 10, "name": "APOLLO ENDOSURGERY, INC."}, {"cik": 11, "name": "Apollo Endosurgery Inc"},
+                          {"cik": 12, "name": "APOLLO ENDOSURGERY US INC"}])
+    r = E.resolve_name("Apollo Endosurgery", E.NameIndex([]), lookup)
+    assert r["cik"] is None
+    assert {(x["cik"], x["method"]) for x in r["review"]} >= {(10, "edgar_name_index_exact_ambiguous"), (11, "edgar_name_index_exact_ambiguous")}
+
+
+def test_item_1a_not_provided_is_labelled_with_its_text():
+    text = "Item 1A. Risk Factors\nAs a smaller reporting company, we are not required to provide the information required by this Item.\nItem 1B. None"
+    ex = E.extract_item_1a(text)
+    assert not ex["ok"] and ex["reason"].startswith("not provided") and ex["snippet"].startswith("As a smaller reporting company")
+    short = E.extract_item_1a("Item 1A. Risk Factors\nSee page 12.\nItem 2. Properties")
+    assert short["reason"] == "section is 12 chars" and short["snippet"] == "See page 12."
